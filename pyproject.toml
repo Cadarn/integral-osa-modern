@@ -1,0 +1,51 @@
+[project]
+name = "integral-cloud-analysis"
+version = "0.1.0"
+description = "Modernized INTEGRAL OSA analysis pipeline optimized for Apple Silicon and Cloud K8s"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "astropy>=6.0.0",
+    "astroquery>=0.4.7",
+    "numpy>=1.26.0",
+    "scipy>=1.12.0",
+    "matplotlib>=3.8.0",
+    "fitsio>=1.2.4",
+    "typer>=0.12.0",
+    "rich>=13.7.0",
+    "httpx[http2]>=0.27.0",
+    "boto3>=1.34.0",
+    "google-cloud-storage>=2.14.0",
+    "pydantic>=2.6.0",
+    "tqdm>=4.66.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.3.0",
+    "mypy>=1.9.0",
+]
+
+[project.scripts]
+integral = "integral_cli.main:app"
+integral-fetch = "scripts.fetch_integral_data:main"
+integral-validate = "scripts.validate_science_products:main"
+integral-distribute = "pipeline.scw_distributor:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/integral_cli", "scripts", "pipeline"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.mypy]
+python_version = "3.10"
+strict = false
+ignore_missing_imports = true

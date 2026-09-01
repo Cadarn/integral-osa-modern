@@ -1,0 +1,60 @@
+# syntax=docker/dockerfile:1
+# Modernized x86_64 Baseline Container with CentOS Vault mirrors and uv
+FROM --platform=linux/amd64 centos:7
+
+# Fix CentOS 7 EOL repo mirrors to vault.centos.org
+RUN sed -i s/mirror.centos.org/vault.centos.org/g /etc/yum.repos.d/CentOS-*.repo && \
+    sed -i s/^#.*baseurl=http/baseurl=http/g /etc/yum.repos.d/CentOS-*.repo && \
+    sed -i s/^mirrorlist=http/#mirrorlist=http/g /etc/yum.repos.d/CentOS-*.repo
+
+RUN yum -y install epel-release && \
+    sed -i s/download.fedoraproject.org\\/pub\\/epel/archives.fedoraproject.org\\/pub\\/archive\\/epel/g /etc/yum.repos.d/epel*.repo && \
+    sed -i s/^#.*baseurl=http/baseurl=http/g /etc/yum.repos.d/epel*.repo && \
+    sed -i s/^metalink=http/#metalink=http/g /etc/yum.repos.d/epel*.repo
+
+RUN yum -y update && \
+    yum -y install gcc gcc-c++ gcc-gfortran \
+                   git curl make zlib-devel bzip2 bzip2-devel \
+                   readline-devel sqlite sqlite-devel openssl \
+                   openssl-devel patch libjpeg libpng12 libX11 \
+                   which libXpm libXext wget libgfortran file \
+                   ncurses-devel \
+                   libXt-devel libX11-devel libXpm-devel libXft-devel libXext-devel \
+                   cmake pcre-devel mesa-libGL-devel mesa-libGLU-devel glew-devel ftgl-devel \
+                   fftw-devel cfitsio-devel graphviz-devel gsl-static \
+                   compat-gcc-44 compat-gcc-44-c++ compat-gcc-44-c++.gfortran \
+                   python3 python3-devel && \
+    yum clean all
+
+RUN ln -s /usr/lib64/libpcre.so.1 /usr/lib64/libpcre.so.0 2>/dev/null || true
+RUN cp -fv /usr/bin/gfortran /usr/bin/g95 2>/dev/null || true
+
+# Install uv from official image
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Install Python environment with uv
+WORKDIR /build
+COPY pyproject.toml uv.lock ./
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN uv venv /opt/venv && \
+    uv sync --frozen --no-install-project --no-dev && \
+    rm -rf /build
+
+# Setup directories
+RUN mkdir -pv /data/cat/hec /data/cat/omc /data/scw /data/aux /data/ic /data/idx /opt/osa /opt/heasoft
+
+COPY osa-docker/init.sh /init.sh
+COPY osa-docker/init.d /init.d
+COPY osa-docker/tests /tests
+
+ENV ISDC_REF_CAT=/data/cat/hec/gnrl_refr_cat_0043.fits
+ENV ISDC_OMC_CAT=/data/cat/omc/omc_refr_cat_0005.fits
+ENV REP_BASE_PROD=/data
+ENV CURRENT_IC=/data
+ENV ISDC_ENV=/opt/osa
+ENV HOME_OVERRIDE=/home/integral
+
+WORKDIR /home/integral
+ENTRYPOINT ["/bin/bash", "-c", "source /init.sh && exec \"$@\"", "--"]
+CMD ["bash"]

@@ -1,0 +1,31 @@
+# Python / UV
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Working directories & Science Data products
+work/
+work_*/
+pfiles/
+*.fits
+*.fits.gz
+*.log
+commonlog.txt
+
+# Docker build caches / tarballs
+*.tar.gz
+*.tar.bz2
+*.tar
+
+# OS / IDE
+.DS_Store
+.vscode/
+.idea/

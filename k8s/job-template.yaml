@@ -1,0 +1,64 @@
+# ==============================================================================
+# job-template.yaml
+# Kubernetes Batch Job for Scalable, Parallel INTEGRAL Science Window Reduction
+# ==============================================================================
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: integral-scw-job
+  labels:
+    app.kubernetes.io/name: integral-osa
+    astronomy.integral/workload: batch
+spec:
+  parallelism: 10 # Adjust for desired concurrent workers
+  completions: 10 # Total number of jobs in the batch
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        astronomy.integral/workload: batch
+    spec:
+      restartPolicy: OnFailure
+      tolerations:
+        - key: "astronomy.integral/workload"
+          operator: "Equal"
+          value: "batch"
+          effect: "NoSchedule"
+      containers:
+        - name: osa-worker
+          image: integralsw/osa:latest-batch
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "/pipeline/runner_scw.sh"]
+          env:
+            - name: S3_BUCKET
+              value: "integral-science-archive"
+            - name: GCS_BUCKET
+              value: "integral-science-archive"
+            - name: REP_BASE_PROD
+              value: "/data"
+            - name: CURRENT_IC
+              value: "/data"
+            - name: INSTRUMENT
+              value: "IBIS" # IBIS, JEMX, or SPI
+          resources:
+            requests:
+              cpu: "1.8"
+              memory: "3.5Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+          volumeMounts:
+            - name: scratch-storage
+              mountPath: /scratch
+            - name: pipeline-scripts
+              mountPath: /pipeline
+      volumes:
+        - name: scratch-storage
+          emptyDir:
+            medium: Memory
+            sizeLimit: 4Gi
+        - name: pipeline-scripts
+          configMap:
+            name: integral-pipeline-scripts
+            defaultMode: 0755

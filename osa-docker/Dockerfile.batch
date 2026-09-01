@@ -1,0 +1,52 @@
+# syntax=docker/dockerfile:1
+# Ultra-Lean Headless Batch Container for AWS/GCP Kubernetes Job Workers
+FROM --platform=$TARGETPLATFORM ubuntu:22.04 AS runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
+    curl \
+    libgfortran5 \
+    libcfitsio9 \
+    libgsl27 \
+    libreadline8 \
+    zlib1g \
+    libbz2-1.0 \
+    libssl3 \
+    libsqlite3-0 \
+    python3 \
+    make \
+    file \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv from official image
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Install minimal batch Python dependencies using uv
+WORKDIR /build
+COPY pyproject.toml uv.lock ./
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN uv venv /opt/venv && \
+    uv sync --frozen --no-install-project --no-dev && \
+    rm -rf /build
+
+# Setup runtime directories
+RUN mkdir -pv /data/cat/hec /data/cat/omc /data/scw /data/aux /data/ic /data/idx /opt/osa /opt/heasoft /output /scratch
+
+COPY init.sh /init.sh
+COPY init.d /init.d
+
+ENV ISDC_REF_CAT=/data/cat/hec/gnrl_refr_cat_0043.fits
+ENV ISDC_OMC_CAT=/data/cat/omc/omc_refr_cat_0005.fits
+ENV REP_BASE_PROD=/data
+ENV CURRENT_IC=/data
+ENV ISDC_ENV=/opt/osa
+ENV HOME_OVERRIDE=/scratch
+
+WORKDIR /scratch
+ENTRYPOINT ["/bin/bash", "-c", "source /init.sh && exec \"$@\"", "--"]
+CMD ["bash"]

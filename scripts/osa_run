@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# osa_run
+# Smart runner for INTEGRAL OSA container on Apple Silicon (ARM64) and Linux
+# ==============================================================================
+
+set -eo pipefail
+
+HOST_ARCH=$(uname -m)
+if [ "$HOST_ARCH" = "arm64" ] || [ "$HOST_ARCH" = "aarch64" ]; then
+    DEFAULT_IMAGE="integralsw/osa:latest-arm64"
+    PLATFORM_FLAG="--platform=linux/arm64"
+else
+    DEFAULT_IMAGE="integralsw/osa:latest-x86"
+    PLATFORM_FLAG="--platform=linux/amd64"
+fi
+
+IMAGE="${OSA_IMAGE:-$DEFAULT_IMAGE}"
+WORKDIR="${WORKDIR:-$PWD}"
+DATA_DIR="${REP_BASE_PROD:-$HOME/integral_data}"
+IC_DIR="${CURRENT_IC:-$DATA_DIR}"
+
+mkdir -pv "$WORKDIR/pfiles"
+
+# X11 Display handling
+DOCKER_ENV_ARGS=()
+if [ -n "${DISPLAY:-}" ]; then
+    DOCKER_ENV_ARGS+=("-e" "DISPLAY=$DISPLAY")
+    if [ -d "/tmp/.X11-unix" ]; then
+        DOCKER_ENV_ARGS+=("-v" "/tmp/.X11-unix:/tmp/.X11-unix:ro")
+    fi
+fi
+
+# Mounts for data directories
+MOUNT_ARGS=(
+    "-v" "$WORKDIR:/home/integral"
+)
+
+if [ -d "$DATA_DIR/scw" ]; then
+    MOUNT_ARGS+=("-v" "$DATA_DIR/scw:/data/scw:ro")
+fi
+if [ -d "$DATA_DIR/aux" ]; then
+    MOUNT_ARGS+=("-v" "$DATA_DIR/aux:/data/aux:ro")
+fi
+if [ -d "$IC_DIR/ic" ]; then
+    MOUNT_ARGS+=("-v" "$IC_DIR/ic:/data/ic:ro")
+fi
+if [ -d "$IC_DIR/idx" ]; then
+    MOUNT_ARGS+=("-v" "$IC_DIR/idx:/data/idx:ro")
+fi
+if [ -d "$DATA_DIR/cat" ]; then
+    MOUNT_ARGS+=("-v" "$DATA_DIR/cat:/data/cat:ro")
+fi
+
+USER_ID=$(id -u)
+GROUP_ID=$(id -g)
+
+if [ $# -eq 0 ]; then
+    echo "============================================================"
+    echo "Starting interactive INTEGRAL OSA session"
+    echo "Architecture: $HOST_ARCH | Container Image: $IMAGE"
+    echo "Data directory: $DATA_DIR"
+    echo "Work directory: $WORKDIR"
+    echo "============================================================"
+    docker run --rm -it \
+        $PLATFORM_FLAG \
+        --user "$USER_ID:$GROUP_ID" \
+        "${DOCKER_ENV_ARGS[@]}" \
+        "${MOUNT_ARGS[@]}" \
+        "$IMAGE" bash
+else
+    docker run --rm \
+        $PLATFORM_FLAG \
+        --user "$USER_ID:$GROUP_ID" \
+        "${DOCKER_ENV_ARGS[@]}" \
+        "${MOUNT_ARGS[@]}" \
+        "$IMAGE" bash -c "$*"
+fi

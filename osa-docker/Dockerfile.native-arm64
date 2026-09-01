@@ -1,0 +1,263 @@
+# syntax=docker/dockerfile:1
+# Phase 4: Native Apple Silicon (ARM64) INTEGRAL/OSA 11.2 Build
+#
+# All patches verified by iterative compilation on aarch64-linux-gnu (GCC 11 / Ubuntu 22.04).
+# Patch summary:
+#   1. dal3ibis: remove 'inline' from C function definitions (GNU89 inline semantics removed)
+#   2. ISDCLimits.h: add uchar/uint/ulong/ushort typedefs (not in glibc on aarch64)
+#   3. zpan_minimizing.f90: rename label error_0 -> 13 (reserved keyword in gfortran)
+#   4. ISDCmain.cxx: remove throw(ISDCException) spec (illegal in C++17)
+#   5. Copy *.cxx into /opt/osa/include/ so ibis_science_analysis.C can #include "ISDCmain.cxx"
+#   6. Fortran: -fallow-argument-mismatch for legacy argument mismatches
+
+FROM --platform=linux/arm64 ubuntu:22.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
+# ── System build dependencies ────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gfortran \
+    autoconf \
+    automake \
+    autotools-dev \
+    libtool \
+    git \
+    curl \
+    wget \
+    ca-certificates \
+    file \
+    bzip2 \
+    libreadline-dev \
+    libncurses5-dev \
+    libssl-dev \
+    zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── uv for Python management (multi-stage copy) ──────────────────────────────
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# ── Download NASA OSA 11.2 Source Code ───────────────────────────────────────
+WORKDIR /src
+RUN wget -q https://heasarc.gsfc.nasa.gov/FTP/integral/software/osa11.2-CentOS_7.8.2003_x86_64-src.tar.gz \
+        -O osa-src.tar.gz && \
+    tar -xzf osa-src.tar.gz && \
+    rm -f osa-src.tar.gz
+
+WORKDIR /src/osa
+
+# ── Apply all source patches ─────────────────────────────────────────────────
+
+# Patch 1: Update config.guess/config.sub for ARM64 detection
+RUN for f in $(find /src/osa -name 'config.guess'); do \
+        cp -f /usr/share/misc/config.guess "$f"; \
+    done && \
+    for f in $(find /src/osa -name 'config.sub'); do \
+        cp -f /usr/share/misc/config.sub "$f"; \
+    done
+
+# Patch 2: Add -fallow-argument-mismatch, -finit-local-zero, and enable -fdefault-integer-8 for aarch64
+RUN sed -i 's/-Wcharacter-truncation/-Wcharacter-truncation -fallow-argument-mismatch -finit-local-zero/g' \
+        /src/osa/support-sw/makefiles/ac_stuff/configure.in \
+        /src/osa/support-sw/makefiles/ac_stuff/configure && \
+    sed -i 's/test "${build_cpu}" = "x86_64"/test "${build_cpu}" = "x86_64" -o "${build_cpu}" = "aarch64"/g' \
+        /src/osa/support-sw/makefiles/ac_stuff/configure.in \
+        /src/osa/support-sw/makefiles/ac_stuff/configure
+
+
+
+# Patch 3: Fix reserved label 'error_0' in zpan_minimizing.f90
+RUN sed -i 's/error_0/13/g' /src/osa/support-sw/isdcmath/zpan_minimizing.f90
+
+# Patch 7: Add AArch64 (ARM64) little-endian machine detection to bundled cfitsio
+# The cfitsio in OSA 11.2 predates ARM64 Linux; without this, FITS byte-swap
+# check at runtime prints a fatal warning and og_create fails.
+RUN sed -i 's/#elif defined(__ia64__)  || defined(__x86_64__)/#elif defined(__aarch64__) || defined(__ia64__)  || defined(__x86_64__)/' \
+        /src/osa/support-sw/cfitsio/fitsio2.h
+
+# Patch 8: Nullify local and module pointers in ii_pif and ii_map_rebin
+# In Fortran 90, unallocated pointers have undefined association status.
+# Under gfortran on aarch64, associated() evaluates true on uninitialized stack/BSS
+# addresses, causing deallocate() to call free() on garbage pointers (munmap_chunk / SEGV).
+RUN sed -i '/procName = '\''CleanStaInit'\''/a \ \ nullify(distance, pomx, pomy, order)' \
+        /src/osa/analysis-sw/ibis/ii_pif/ii_pif_init.f90 && \
+    sed -i '/procName= '\''II_PIF_CONTROL '\''/a \ \ nullify(InScwCat, InSimCat, InSourceList, cleanParTab, Duration)\n  nullify(Rmask, Maskp, SourceModel, InCatAlpha, InCatDelta)\n  nullify(InCatId, InCatName, InCatFlux, point_rot_mat)\n  nullify(pointing_table, Shd, DeadZonePattern, DetActivePixels)' \
+        /src/osa/analysis-sw/ibis/ii_pif/ii_pif_control.f90 && \
+    sed -i '/procName= '\'' CONTROL '\''/a \ \ nullify(InEnergyBands, InToOutBandNums, OutEnergyBands)\n  nullify(BkgBins, BkgArr, UniArr, UniBins, OffAxisCorr)\n  nullify(OffCorrBins, MeanOffCorrBins, MeanUniBins, ArfBins)' \
+        /src/osa/analysis-sw/ibis/ii_map_rebin/ii_map_rebin_control.f90 && \
+    sed -i '/procName = '\''InterBkgBand'\''/a \ \ nullify(pomArr)' \
+        /src/osa/analysis-sw/ibis/ii_map_rebin/ii_map_rebin_aux.f90 && \
+    sed -i '/procName = '\''InterOffCorrBand'\''/a \ \ nullify(pomArr)' \
+        /src/osa/analysis-sw/ibis/ii_map_rebin/ii_map_rebin_aux.f90 && \
+    sed -i '/procName = '\''InterUniBand'\''/a \ \ nullify(pomArr)' \
+        /src/osa/analysis-sw/ibis/ii_map_rebin/ii_map_rebin_aux.f90 && \
+    sed -i '/procName= '\''ii_skyimage_CONTROL '\''/a \ \ nullify(ImaStatPar, BkgParTab, AttCoeffs, AttSlices, FullAttCoeffVector)\n  nullify(PomAttCoeff, ZeroTab, TimeBins, ActiveScwArray, ChanNums)\n  nullify(InEnergyBands, InToOutBandNums, OutEnergyBands, posAngle, raX)\n  nullify(decX, raZ, decZ, covartab, covar1tab, SliceEnergy, SliceWidth)\n  nullify(TungTab, AluTab, LeadTab, MapExpo, Map, MapPoint, MapVar, pMapVar)\n  nullify(MapSignif, InScwCat, InSimCat, MapPointVar, InSourceList, FilterImage)\n  nullify(FilterSky, skySnr, mapSnr, cleanParTab, Duration, ShdTimes)\n  nullify(ScwImage, ScwCleaImage, ScwResid, ScwNoSou, ScwSignif, ScwVar)\n  nullify(ScwExpo, ThickCorr, OffAxisCorr, OutSourceCat, OutSourceCatFlux)\n  nullify(OutSourceCatLocErr, OutSourceCatFluxErr, OutSourceCatSig, InCatAlpha)\n  nullify(InCatDelta, InCatId, InCatName, InCatFlux, FitDecTab, FitPosX)\n  nullify(AllSouMapFlux, AllSouMapSnr, AllSouList, RawFluxesTab, point_rot_mat)\n  nullify(pointing_table, InCatFixed, OffCorrBins)' \
+        /src/osa/analysis-sw/ibis/ii_skyimage/ii_skyimage_control.f90 && \
+    sed -i '/procName = '\''OgOpen'\''/a \ \ nullify(EBins, TBins, Chans, ijd, iijd, gti_start, gti_stop)\n  nullify(true_gtistart, true_gtiend, RaX_p, DecX_p, RaZ_p, DecZ_p)\n  nullify(time_p, tstart_p, tstop_p, num_gti_p, swg_pointer_p)' \
+        /src/osa/analysis-sw/ibis/ii_skyimage/ii_skyimage_base.f90 && \
+    sed -i '/procName = '\''ScwPrep'\''/a \ \ nullify(EBins, TBins, Chans)' \
+        /src/osa/analysis-sw/ibis/ii_skyimage/ii_skyimage_base.f90 && \
+    sed -i '/procName = '\''CleanStaInit'\''/a \ \ nullify(distance, pomx, pomy, order)' \
+        /src/osa/analysis-sw/ibis/ii_skyimage/ii_skyimage_init.f90 && \
+    sed -i '/procName = '\''DeconInit'\''/a \ \ nullify(CWORK, GP, GM, workp, workm, work, M, GPMP, GMMM)' \
+        /src/osa/analysis-sw/ibis/ii_skyimage/ii_skyimage_declean.f90 && \
+    sed -i '/iw = 0/a \ \ nullify(filter, snr)' \
+        /src/osa/analysis-sw/ibis/ii_skyimage/ii_skyimage_deconlib.f90
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Patch 4: Add missing unsigned typedefs to ISDCLimits.h
+RUN sed -i '1i typedef unsigned char uchar; typedef unsigned int uint; typedef unsigned long ulong; typedef unsigned short ushort;' \
+        /src/osa/support-sw/isdcroot/ISDCLimits.h
+
+# Patch 5: Remove 'inline' from dal3ibis calib functions (C99 inline ODR)
+RUN sed -i 's/^inline //g' \
+        /src/osa/support-sw/dal3ibis/dal3ibis_calib_ebands.c \
+        /src/osa/support-sw/dal3ibis/dal3ibis_calib_ebands.h \
+        /src/osa/support-sw/dal3ibis/dal3ibis_calib.c \
+        /src/osa/support-sw/dal3ibis/dal3ibis_calib.h
+
+# Patch 6: Remove dynamic exception spec throw() from ISDCmain.cxx (C++17)
+RUN sed -i 's/) throw(ISDC::ISDCException)/)/g' \
+        /src/osa/support-sw/isdcroot/ISDCmain.cxx
+
+# ── ISDC build environment ────────────────────────────────────────────────────
+ENV ISDC_ENV=/opt/osa
+ENV ISDC_DEV_ALLOW_GLOBAL_INSTALL=yes
+# isdc_install lives under /src/osa/ac_stuff after configure; expose it here
+ENV PATH="/src/osa/support-sw/makefiles:/src/osa/ac_stuff:/opt/osa/bin:${PATH}"
+
+# ── Create install prefix directories ────────────────────────────────────────
+RUN mkdir -pv /opt/osa/lib /opt/osa/include /opt/osa/bin /opt/osa/f90mod \
+              /opt/osa/pfiles /opt/osa/help /opt/osa/templates \
+              /opt/osa/share/default_scripts /opt/osa/share \
+              /opt/osa/bin/ac_stuff /opt/osa/ac_stuff
+
+# ── Build bundled cfitsio first (provides libcfitsio.a + headers) ─────────────
+RUN cd /src/osa/support-sw/cfitsio && \
+    ./configure --prefix=/opt/osa && \
+    make -j$(nproc) && \
+    cp -fv fitsio.h fitsio2.h longnam.h drvrsmem.h /opt/osa/include/ && \
+    cp -fv libcfitsio.a /opt/osa/lib/
+
+# ── Run the top-level ISDC configure (populates /src/osa/ac_stuff/) ──────────
+RUN cd /src/osa && \
+    unset build_alias host_alias && \
+    /src/osa/support-sw/makefiles/ac_stuff/configure \
+        --prefix=/opt/osa \
+        --without-cern-root \
+        --without-isdcroot
+
+# ── Build support-sw libraries (explicit cd chains, ordered by dependency) ────
+RUN cd /src/osa/support-sw/cfortran && make global_install && \
+    cd /src/osa/support-sw/sla_c    && make global_install && \
+    cd /src/osa/support-sw/sla_f90  && make global_install && \
+    cd /src/osa/support-sw/pil      && make global_install && \
+    cd /src/osa/support-sw/ril      && make global_install && \
+    cd /src/osa/support-sw/dal      && make global_install && \
+    cd /src/osa/support-sw/common   && make global_install && \
+    cd /src/osa/support-sw/isdcmath && make global_install
+
+RUN cd /src/osa/support-sw/dal3gen  && make global_install && \
+    cd /src/osa/support-sw/dal3hk   && make global_install && \
+    cd /src/osa/support-sw/dal3aux  && make global_install && \
+    cd /src/osa/support-sw/dal3cat  && make global_install && \
+    cd /src/osa/support-sw/dal3ibis && make global_install && \
+    cd /src/osa/support-sw/dal3spi  && make global_install && \
+    cd /src/osa/support-sw/dal3jemx && make global_install && \
+    cd /src/osa/support-sw/dal3omc  && make global_install && \
+    cd /src/osa/support-sw/wcslib   && make global_install
+
+# ── Build ISDCroot (root-independent static library) ─────────────────────────
+# ISDCmain.cxx copied to /opt/osa/include so ibis_science_analysis.C can find it
+RUN cd /src/osa/support-sw/isdcroot && \
+    gcc -c -g -O2 -I. -I/opt/osa/include \
+        ISDCsysutils.c icaccess.c libscript.c && \
+    g++ -c -g -O2 -I. -I/opt/osa/include \
+        ISDCPars.cxx ISDCTask.cxx ISDCUtils.cxx StrictType.cxx && \
+    ar rv libISDCroot.a \
+        ISDCsysutils.o icaccess.o libscript.o \
+        ISDCPars.o ISDCTask.o ISDCUtils.o StrictType.o && \
+    ranlib libISDCroot.a && \
+    cp -fv libISDCroot.a /opt/osa/lib/ && \
+    cp -fv *.h *.cxx /opt/osa/include/
+
+# ── support-sw tools, templates, hk_list, errors, init_env ───────────────────
+RUN cd /src/osa/support-sw/hk_list      && make global_install && \
+    cd /src/osa/support-sw/isdc_errors  && make global_install && \
+    cd /src/osa/support-sw/tools        && make global_install && \
+    cd /src/osa/support-sw/templates    && make global_install
+
+
+# ── analysis-sw tools ────────────────────────────────────────────────────────
+RUN cd /src/osa/analysis-sw/tools && make global_install
+
+# ── analysis-sw IBIS pipeline (ibis_science_analysis etc.) ───────────────────
+RUN cd /src/osa/analysis-sw/ibis && make global_install
+
+# ── Verify key binaries ───────────────────────────────────────────────────────
+RUN test -x /opt/osa/bin/ibis_science_analysis && \
+    test -x /opt/osa/bin/og_create && \
+    test -x /opt/osa/bin/ii_skyimage && \
+    echo "=== All key OSA ARM64 binaries verified ===" && \
+    ls -lh /opt/osa/bin/ibis_science_analysis /opt/osa/bin/og_create /opt/osa/bin/ii_skyimage
+
+# ════════════════════════════════════════════════════════════════════════════
+# Runtime stage: minimal Ubuntu 22.04 + uv + Python venv
+# ════════════════════════════════════════════════════════════════════════════
+FROM --platform=linux/arm64 ubuntu:22.04 AS runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libreadline8 \
+    libncurses5 \
+    libgomp1 \
+    libgfortran5 \
+    ca-certificates \
+    curl \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+COPY --from=builder /opt/osa /opt/osa
+
+WORKDIR /build-python
+COPY pyproject.toml uv.lock* ./
+ENV VIRTUAL_ENV=/opt/venv
+RUN uv venv /opt/venv --python 3.12 && \
+    uv pip install --python /opt/venv/bin/python astropy numpy scipy matplotlib && \
+    rm -rf /root/.cache/uv
+
+ENV ISDC_ENV=/opt/osa
+ENV OSA_DIR=/opt/osa
+ENV PATH="/opt/osa/bin:/opt/venv/bin:${PATH}"
+ENV PFILES="/opt/osa/pfiles"
+ENV ISDC_CALDB=/caldb
+ENV HEADAS=/opt/osa
+ENV CFITSIO_INCLUDE_FILES=/opt/osa/templates
+ENV REP_BASE_PROD=/data
+
+WORKDIR /work
+
+LABEL org.opencontainers.image.description="INTEGRAL OSA 11.2 natively compiled for Apple Silicon (ARM64/aarch64)"
+LABEL org.opencontainers.image.version="11.2-arm64"
+
+CMD ["/bin/bash"]

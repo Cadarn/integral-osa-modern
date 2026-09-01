@@ -1,0 +1,61 @@
+# ==============================================================================
+# node-pool-spot.yaml
+# Scalable, Cost-Optimized Spot Node Pools for AWS (Karpenter/EKS) & GCP (GKE)
+# Enables 70-90% cost savings with scale-to-zero when idle.
+# ==============================================================================
+
+---
+# 1. AWS Karpenter Spot Provisioner (Multi-Arch: Graviton3 ARM64 & x86_64)
+apiVersion: karpenter.sh/v1beta1
+kind: NodePool
+metadata:
+  name: integral-osa-spot
+spec:
+  template:
+    spec:
+      requirements:
+        - key: "karpenter.sh/capacity-type"
+          operator: In
+          values: ["spot"]
+        - key: "kubernetes.io/arch"
+          operator: In
+          values: ["arm64", "amd64"] # Graviton ARM64 preferred for lowest cost
+        - key: "karpenter.k8s.aws/instance-category"
+          operator: In
+          values: ["c", "m"]
+        - key: "karpenter.k8s.aws/instance-generation"
+          operator: Gt
+          values: ["5"]
+      nodeClassRef:
+        name: integral-osa-nodeclass
+      taints:
+        - key: "astronomy.integral/workload"
+          value: "batch"
+          effect: NoSchedule
+  limits:
+    cpu: 1000 # Max concurrent vCPUs
+    memory: 2000Gi
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 30s # Scale to zero immediately when queue drains
+---
+# 2. GCP GKE Spot Node Pool Definition (Example GKE manifest / Config Connector)
+apiVersion: container.cnrm.cloud.google.com/v1beta1
+kind: ContainerNodePool
+metadata:
+  name: integral-spot-pool
+spec:
+  clusterRef:
+    name: integral-cluster
+  autoscaling:
+    minNodeCount: 0 # Scale to zero when idle
+    maxNodeCount: 50
+  nodeConfig:
+    spot: true
+    machineType: "t2a-standard-8" # ARM64 Ampere or c2-standard-8 for x86
+    diskSizeGb: 50
+    diskType: "pd-ssd"
+    taint:
+      - key: "astronomy.integral/workload"
+        value: "batch"
+        effect: "NO_SCHEDULE"

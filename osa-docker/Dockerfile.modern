@@ -1,0 +1,55 @@
+# syntax=docker/dockerfile:1
+# Tier 2: Modernized INTEGRAL OSA Container (Verified OSA 11 + Modern Python 3.12/Astropy Stack)
+FROM --platform=linux/amd64 ubuntu:22.04 AS python-builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+ENV UV_PYTHON_INSTALL_DIR=/opt/python
+RUN uv python install 3.12 --install-dir /opt/python
+
+# Prepare modern C++ standard library for CentOS 7 runtime
+RUN mkdir -pv /opt/python/lib && \
+    cp -fv /usr/lib/x86_64-linux-gnu/libstdc++.so.6* /opt/python/lib/
+
+WORKDIR /build
+COPY pyproject.toml uv.lock ./
+ENV VIRTUAL_ENV=/opt/venv
+RUN uv venv /opt/venv --python 3.12 --relocatable && \
+    uv sync --frozen --no-install-project --no-dev --active
+
+# Final Runtime Image based on verified OSA 11 CentOS 7 base
+FROM --platform=linux/amd64 integralsw/osa:11.0 AS runtime
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+COPY --from=python-builder /opt/python /opt/python
+COPY --from=python-builder /opt/venv /opt/venv
+
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="/opt/venv/bin:/opt/osa/bin:/opt/heasoft/x86_64-pc-linux-gnu-libc2.17/bin:$PATH"
+ENV LD_LIBRARY_PATH="/opt/python/lib:/opt/osa/lib:/opt/heasoft/x86_64-pc-linux-gnu-libc2.17/lib:/lib64:/usr/lib64"
+
+# Setup catalog compatibility aliases
+RUN ln -sf /data/cat/hec/gnrl_refr_cat_0043.fits /data/cat/hec/gnrl_refr_cat_0041.fits 2>/dev/null || true && \
+    ln -sf /data/cat/hec/gnrl_refr_cat_0043.fits /data/cat/hec/gnrl_refr_cat_0042.fits 2>/dev/null || true && \
+    ln -sf /data/cat/hec/gnrl_refr_cat_0043.fits /data/cat/hec/gnrl_refr_cat_0040.fits 2>/dev/null || true
+
+ENV ISDC_REF_CAT=/data/cat/hec/gnrl_refr_cat_0043.fits
+ENV ISDC_OMC_CAT=/data/cat/omc/omc_refr_cat_0005.fits
+ENV REP_BASE_PROD=/data
+ENV CURRENT_IC=/data
+ENV COMMONSCRIPT=1
+ENV COMMONLOGFILE=+/home/integral/commonlog.txt
+ENV DISPLAY=""
+ENV HOME_OVERRIDE=/home/integral
+
+WORKDIR /home/integral
+CMD ["bash"]

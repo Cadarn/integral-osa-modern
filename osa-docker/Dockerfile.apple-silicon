@@ -1,0 +1,104 @@
+# syntax=docker/dockerfile:1
+# Optimized INTEGRAL OSA 11 Modernized Multiarch Image for Apple Silicon
+FROM integralsw/osa:11.0 AS legacy-osa
+
+FROM --platform=linux/arm64 ubuntu:22.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    python3 \
+    python3-dev \
+    python3-venv \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+WORKDIR /build
+COPY pyproject.toml uv.lock ./
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN uv venv /opt/venv && \
+    uv sync --frozen --no-install-project --no-dev --active
+
+FROM --platform=linux/arm64 ubuntu:22.04 AS runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
+# Configure multiarch APT sources (arm64 on ports.ubuntu.com + amd64 on archive.ubuntu.com)
+RUN echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ jammy main restricted universe multiverse" > /etc/apt/sources.list && \
+    echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ jammy-updates main restricted universe multiverse" >> /etc/apt/sources.list && \
+    echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ jammy-security main restricted universe multiverse" >> /etc/apt/sources.list && \
+    echo "deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ jammy main restricted universe multiverse" >> /etc/apt/sources.list && \
+    echo "deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ jammy-updates main restricted universe multiverse" >> /etc/apt/sources.list && \
+    echo "deb [arch=amd64] http://security.ubuntu.com/ubuntu/ jammy-security main restricted universe multiverse" >> /etc/apt/sources.list && \
+    dpkg --add-architecture amd64 && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
+    curl \
+    wget \
+    make \
+    file \
+    libc6:amd64 \
+    libstdc++6:amd64 \
+    libgfortran5:amd64 \
+    libncurses5:amd64 \
+    libtinfo5:amd64 \
+    libx11-6:amd64 \
+    libxpm4:amd64 \
+    libxft2:amd64 \
+    libxext6:amd64 \
+    zlib1g:amd64 \
+    libbz2-1.0:amd64 \
+    libssl3:amd64 \
+    libgfortran5 \
+    libcfitsio9 \
+    libgsl27 \
+    libreadline8 \
+    libncurses5 \
+    libx11-6 \
+    libxpm4 \
+    libxft2 \
+    libxext6 \
+    zlib1g \
+    libbz2-1.0 \
+    libssl3 \
+    libsqlite3-0 \
+    python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy legacy compiled OSA, HEASoft, and CentOS 7 runtime libraries from verified base image
+COPY --from=legacy-osa /opt/osa /opt/osa
+COPY --from=legacy-osa /opt/heasoft /opt/heasoft
+COPY --from=legacy-osa /usr/lib64 /opt/compat-lib64
+
+# Copy modern virtual environment and uv (ARM64 native)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+COPY --from=builder /opt/venv /opt/venv
+
+ENV ROOTSYS=/opt/osa/root
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="/opt/osa/bin:/opt/heasoft/x86_64-pc-linux-gnu-libc2.17/bin:/opt/venv/bin:$PATH"
+ENV LD_LIBRARY_PATH="/opt/osa/lib:/opt/osa/root/lib:/opt/compat-lib64:/opt/heasoft/x86_64-pc-linux-gnu-libc2.17/lib:/lib64:/usr/lib/x86_64-linux-gnu"
+ENV PFILES="/home/integral/pfiles;/opt/osa/pfiles:/opt/heasoft/x86_64-pc-linux-gnu-libc2.17/syspfiles"
+ENV ISDC_ENV=/opt/osa
+ENV ISDC_REF_CAT=/data/cat/hec/gnrl_refr_cat_0043.fits
+ENV ISDC_OMC_CAT=/data/cat/omc/omc_refr_cat_0005.fits
+ENV REP_BASE_PROD=/data
+ENV CURRENT_IC=/data
+ENV COMMONSCRIPT=1
+ENV COMMONLOGFILE=+/home/integral/commonlog.txt
+ENV DISPLAY=""
+ENV HOME_OVERRIDE=/home/integral
+
+# Setup runtime directories
+RUN mkdir -pv /data/cat/hec /data/cat/omc /data/scw /data/aux /data/ic /data/idx /home/integral/pfiles /scratch
+
+WORKDIR /home/integral
+CMD ["bash"]
