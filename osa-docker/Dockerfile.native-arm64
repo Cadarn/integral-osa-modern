@@ -33,6 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libncurses5-dev \
     libssl-dev \
     zlib1g-dev \
+    libfftw3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # ── uv for Python management (multi-stage copy) ──────────────────────────────
@@ -57,8 +58,14 @@ RUN for f in $(find /src/osa -name 'config.guess'); do \
         cp -f /usr/share/misc/config.sub "$f"; \
     done
 
-# Patch 2: Add -fallow-argument-mismatch, -finit-local-zero, and enable -fdefault-integer-8 for aarch64
+# Patch 2: Add -fallow-argument-mismatch, -finit-local-zero, -fcommon and enable -fdefault-integer-8 for aarch64
 RUN sed -i 's/-Wcharacter-truncation/-Wcharacter-truncation -fallow-argument-mismatch -finit-local-zero/g' \
+        /src/osa/support-sw/makefiles/ac_stuff/configure.in \
+        /src/osa/support-sw/makefiles/ac_stuff/configure && \
+    sed -i 's/CFLAGS="-g"/CFLAGS="-g -fcommon"/g' \
+        /src/osa/support-sw/makefiles/ac_stuff/configure.in \
+        /src/osa/support-sw/makefiles/ac_stuff/configure && \
+    sed -i 's/CFLAGS="-O2"/CFLAGS="-O2 -fcommon"/g' \
         /src/osa/support-sw/makefiles/ac_stuff/configure.in \
         /src/osa/support-sw/makefiles/ac_stuff/configure && \
     sed -i 's/test "${build_cpu}" = "x86_64"/test "${build_cpu}" = "x86_64" -o "${build_cpu}" = "aarch64"/g' \
@@ -76,7 +83,7 @@ RUN sed -i 's/error_0/13/g' /src/osa/support-sw/isdcmath/zpan_minimizing.f90
 RUN sed -i 's/#elif defined(__ia64__)  || defined(__x86_64__)/#elif defined(__aarch64__) || defined(__ia64__)  || defined(__x86_64__)/' \
         /src/osa/support-sw/cfitsio/fitsio2.h
 
-# Patch 8: Nullify local and module pointers in ii_pif and ii_map_rebin
+# Patch 8: Nullify local and module pointers in IBIS imaging, spectral, and lightcurve routines
 # In Fortran 90, unallocated pointers have undefined association status.
 # Under gfortran on aarch64, associated() evaluates true on uninitialized stack/BSS
 # addresses, causing deallocate() to call free() on garbage pointers (munmap_chunk / SEGV).
@@ -105,21 +112,12 @@ RUN sed -i '/procName = '\''CleanStaInit'\''/a \ \ nullify(distance, pomx, pomy,
     sed -i '/iw = 0/a \ \ nullify(filter, snr)' \
         /src/osa/analysis-sw/ibis/ii_skyimage/ii_skyimage_deconlib.f90
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+# Patch 9: JEM-X isnan() integer argument compatibility & SPI spigti multiple definition
+RUN sed -i 's/isnan( \*(trigBuffer+iSort) )/isnan( (double)\*(trigBuffer+iSort) )/g' \
+        /src/osa/analysis-sw/jemx/j_cor_gain/j_cor_gain_get_osm.c && \
+    sed -i 's/int detid\[ALLDETECTORS+1\];/extern int detid[ALLDETECTORS+1];/' \
+        /src/osa/analysis-sw/spi/spigti/spigti.h && \
+    echo 'int detid[ALLDETECTORS+1];' >> /src/osa/analysis-sw/spi/spigti/spigti.c
 
 # Patch 4: Add missing unsigned typedefs to ISDCLimits.h
 RUN sed -i '1i typedef unsigned char uchar; typedef unsigned int uint; typedef unsigned long ulong; typedef unsigned short ushort;' \
@@ -158,10 +156,12 @@ RUN cd /src/osa/support-sw/cfitsio && \
 # ── Run the top-level ISDC configure (populates /src/osa/ac_stuff/) ──────────
 RUN cd /src/osa && \
     unset build_alias host_alias && \
+    CFLAGS="-g -O2 -fcommon" \
     /src/osa/support-sw/makefiles/ac_stuff/configure \
         --prefix=/opt/osa \
         --without-cern-root \
         --without-isdcroot
+
 
 # ── Build support-sw libraries (explicit cd chains, ordered by dependency) ────
 RUN cd /src/osa/support-sw/cfortran && make global_install && \
@@ -184,7 +184,7 @@ RUN cd /src/osa/support-sw/dal3gen  && make global_install && \
     cd /src/osa/support-sw/wcslib   && make global_install
 
 # ── Build ISDCroot (root-independent static library) ─────────────────────────
-# ISDCmain.cxx copied to /opt/osa/include so ibis_science_analysis.C can find it
+# ISDCmain.cxx copied to /opt/osa/include so instrument C++ scripts can find it
 RUN cd /src/osa/support-sw/isdcroot && \
     gcc -c -g -O2 -I. -I/opt/osa/include \
         ISDCsysutils.c icaccess.c libscript.c && \
@@ -207,15 +207,26 @@ RUN cd /src/osa/support-sw/hk_list      && make global_install && \
 # ── analysis-sw tools ────────────────────────────────────────────────────────
 RUN cd /src/osa/analysis-sw/tools && make global_install
 
-# ── analysis-sw IBIS pipeline (ibis_science_analysis etc.) ───────────────────
+# ── analysis-sw instruments: IBIS, JEM-X, OMC, SPI ───────────────────────────
 RUN cd /src/osa/analysis-sw/ibis && make global_install
 
-# ── Verify key binaries ───────────────────────────────────────────────────────
+RUN cd /src/osa/analysis-sw/omc  && make global_install
+
+RUN cd /src/osa/analysis-sw/jemx && make global_install
+
+RUN cp -fv /src/osa/analysis-sw/spi/spicommon/include/*.h /opt/osa/include/ && \
+    mkdir -p /src/osa/analysis-sw/spi/fftw3/include && cp /usr/include/fftw3* /src/osa/analysis-sw/spi/fftw3/include/ 2>/dev/null || true && \
+    mkdir -p /src/osa/analysis-sw/spi/spimodfit/fftw3/include && cp /usr/include/fftw3* /src/osa/analysis-sw/spi/spimodfit/fftw3/include/ 2>/dev/null || true && \
+    cd /src/osa/analysis-sw/spi && make global_install
+
+# ── Verify key binaries across all instruments ───────────────────────────────
 RUN test -x /opt/osa/bin/ibis_science_analysis && \
+    test -x /opt/osa/bin/jemx_science_analysis && \
+    test -x /opt/osa/bin/omc_science_analysis && \
+    test -x /opt/osa/bin/spi_science_analysis && \
     test -x /opt/osa/bin/og_create && \
-    test -x /opt/osa/bin/ii_skyimage && \
-    echo "=== All key OSA ARM64 binaries verified ===" && \
-    ls -lh /opt/osa/bin/ibis_science_analysis /opt/osa/bin/og_create /opt/osa/bin/ii_skyimage
+    echo "=== All key OSA ARM64 binaries for IBIS, JEM-X, OMC, and SPI verified ===" && \
+    ls -lh /opt/osa/bin/ibis_science_analysis /opt/osa/bin/jemx_science_analysis /opt/osa/bin/omc_science_analysis /opt/osa/bin/spi_science_analysis
 
 # ════════════════════════════════════════════════════════════════════════════
 # Runtime stage: minimal Ubuntu 22.04 + uv + Python venv
@@ -230,6 +241,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libncurses5 \
     libgomp1 \
     libgfortran5 \
+    libfftw3-bin \
+    libfftw3-double3 \
+    libfftw3-single3 \
     ca-certificates \
     curl \
     wget \

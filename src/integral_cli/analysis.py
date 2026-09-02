@@ -147,3 +147,295 @@ def run_ibis(
         elapsed_sec = time.perf_counter() - start_time
         console.print(f"[bold red]Pipeline stopped after {elapsed_sec:.2f}s: {e}[/bold red]")
         raise typer.Exit(code=1)
+
+
+@analysis_app.command("jemx")
+def run_jemx(
+    scw_input: str = typer.Argument(
+        ...,
+        help="Science Window ID (e.g. 006000010010), comma-separated list, or revolution (e.g. 'rev:0060:5')",
+    ),
+    jemx_unit: int = typer.Option(1, "--unit", "-u", help="JEM-X unit number (1 or 2, default: 1)"),
+    start_level: str = typer.Option("COR", "--start-level", help="Start level (COR, DEAD, BIN_I, IMA, IMA2)"),
+    end_level: str = typer.Option("IMA2", "--end-level", help="End level (IMA, IMA2, SPE, LCR)"),
+    image: Optional[str] = typer.Option(None, "--image", "-i", help="Docker image to run"),
+    workdir: Path = typer.Option(Path.cwd() / "work", "--workdir", "-w", help="Working directory for analysis"),
+    og_name: str = typer.Option("obs_jemx", "--og", "-o", help="Observation group name"),
+    clean: bool = typer.Option(True, "--clean/--no-clean", help="Clean prior observation group directory before run"),
+):
+    """Run JEM-X science analysis pipeline (j_science_analysis) with native ARM64 container."""
+    workdir.mkdir(parents=True, exist_ok=True)
+    scw_file = workdir / "scw.list"
+    obs_dir = workdir / "obs" / og_name
+
+    if clean and obs_dir.exists():
+        shutil.rmtree(obs_dir)
+
+    scws = []
+    if scw_input.startswith("rev:"):
+        parts = scw_input.split(":")
+        rev_id = f"{int(parts[1]):04d}"
+        limit = int(parts[2]) if len(parts) > 2 else None
+        scw_dir = config.rep_base_prod / "scw" / rev_id
+        if not scw_dir.exists():
+            console.print(f"[bold red]Error: Revolution {rev_id} directory {scw_dir} does not exist.[/bold red]")
+            raise typer.Exit(code=1)
+        found_scws = sorted([d.name.split(".")[0] for d in scw_dir.iterdir() if d.is_dir() and d.name.startswith(rev_id) and d.name.split(".")[0].endswith("0010")])
+        if not found_scws:
+            found_scws = sorted([d.name.split(".")[0] for d in scw_dir.iterdir() if d.is_dir() and len(d.name) >= 12])
+        scws = found_scws[:limit] if limit else found_scws
+    elif Path(scw_input).exists():
+        scws = [line.strip() for line in Path(scw_input).read_text().splitlines() if line.strip() and not line.startswith("#")]
+    elif "," in scw_input:
+        scws = [s.strip() for s in scw_input.split(",") if s.strip()]
+    else:
+        scws = [scw_input.strip()]
+
+    formatted_scws = [f"{s}.001" if (len(s) == 12 and not s.endswith(".001")) else s for s in scws]
+    scw_file.write_text("\n".join(formatted_scws) + "\n")
+
+    target_image = image or config.docker_image
+
+    console.print(
+        Panel(
+            f"[bold green]Starting JEM-X {jemx_unit} Science Reduction[/bold green]\n\n"
+            f"• ScW Count:       [cyan]{len(scws)} Science Windows[/cyan]\n"
+            f"• Instrument:      [cyan]JEM-X {jemx_unit}[/cyan]\n"
+            f"• Analysis Level:  [cyan]startLevel={start_level} -> endLevel={end_level}[/cyan]\n"
+            f"• Workdir:         [cyan]{workdir}[/cyan]\n"
+            f"• Docker Image:    [cyan]{target_image}[/cyan]",
+            title="Analysis Setup",
+        )
+    )
+
+    inst_name = f"JMX{jemx_unit}"
+    bash_pipeline = f"""
+    set -e
+    [ -f /init.sh ] && source /init.sh 2>/dev/null || true
+    [ -f /opt/osa/bin/isdc_init_env.sh ] && source /opt/osa/bin/isdc_init_env.sh 2>/dev/null || true
+
+    export ISDC_ENV=/opt/osa
+    export REP_BASE_PROD=/data
+    export CFITSIO_INCLUDE_FILES=/opt/osa/templates
+    export ISDC_REF_CAT="/data/cat/hec/gnrl_refr_cat_0043.fits"
+    export HOME=/home/integral
+    export PFILES="/home/integral/pfiles;/opt/osa/pfiles"
+    mkdir -pv /home/integral/pfiles
+    export DISPLAY=""
+
+    cd /home/integral
+
+    echo "=== 1. Initializing Observation Group ({og_name}) ==="
+    og_create idxSwg="scw.list" \
+              instrument="{inst_name}" \
+              ogid="{og_name}" \
+              baseDir="./" \
+              obsDir="obs"
+
+    echo "=== 2. Running jemx_science_analysis ({inst_name}) ==="
+    cd obs/{og_name}
+    jemx_science_analysis \
+        ogDOL="og_jmx{jemx_unit}.fits[1]" \
+        jemxNum="{jemx_unit}" \
+        startLevel="{start_level}" \
+        endLevel="{end_level}" \
+        nChanBins=4 \
+        chanLow="46 83 129 160" \
+        chanHigh="82 128 159 223" \
+        CAT_I_usrCat="" \
+        LCR_timeStep=4.0 \
+        IC_Group="/data/idx/ic/ic_master_file.fits[1]" \
+        IC_Alias="OSA"
+
+
+
+    """
+
+    start_time = time.perf_counter()
+    try:
+        run_container(command=bash_pipeline, workdir=workdir, image=target_image)
+        elapsed_sec = time.perf_counter() - start_time
+        console.print(f"[bold green]✓ JEM-X pipeline completed in {elapsed_sec:.2f}s ({elapsed_sec/len(scws):.2f}s per ScW)[/bold green]")
+    except Exception as e:
+        elapsed_sec = time.perf_counter() - start_time
+        console.print(f"[bold red]JEM-X pipeline stopped after {elapsed_sec:.2f}s: {e}[/bold red]")
+        raise typer.Exit(code=1)
+
+
+@analysis_app.command("omc")
+def run_omc(
+    scw_input: str = typer.Argument(
+        ...,
+        help="Science Window ID (e.g. 006000010010), comma-separated list, or revolution (e.g. 'rev:0060:5')",
+    ),
+    start_level: str = typer.Option("COR", "--start-level", help="Start level (COR, IMA)"),
+    end_level: str = typer.Option("IMA", "--end-level", help="End level (COR, IMA)"),
+    image: Optional[str] = typer.Option(None, "--image", "-i", help="Docker image to run"),
+    workdir: Path = typer.Option(Path.cwd() / "work", "--workdir", "-w", help="Working directory for analysis"),
+    og_name: str = typer.Option("obs_omc", "--og", "-o", help="Observation group name"),
+    clean: bool = typer.Option(True, "--clean/--no-clean", help="Clean prior observation group directory before run"),
+):
+    """Run OMC science analysis pipeline (omc_science_analysis) with native ARM64 container."""
+    workdir.mkdir(parents=True, exist_ok=True)
+    scw_file = workdir / "scw.list"
+    obs_dir = workdir / "obs" / og_name
+
+    if clean and obs_dir.exists():
+        shutil.rmtree(obs_dir)
+
+    scws = []
+    if scw_input.startswith("rev:"):
+        parts = scw_input.split(":")
+        rev_id = f"{int(parts[1]):04d}"
+        limit = int(parts[2]) if len(parts) > 2 else None
+        scw_dir = config.rep_base_prod / "scw" / rev_id
+        if not scw_dir.exists():
+            console.print(f"[bold red]Error: Revolution {rev_id} directory {scw_dir} does not exist.[/bold red]")
+            raise typer.Exit(code=1)
+        found_scws = sorted([d.name.split(".")[0] for d in scw_dir.iterdir() if d.is_dir() and d.name.startswith(rev_id) and d.name.split(".")[0].endswith("0010")])
+        if not found_scws:
+            found_scws = sorted([d.name.split(".")[0] for d in scw_dir.iterdir() if d.is_dir() and len(d.name) >= 12])
+        scws = found_scws[:limit] if limit else found_scws
+    elif Path(scw_input).exists():
+        scws = [line.strip() for line in Path(scw_input).read_text().splitlines() if line.strip() and not line.startswith("#")]
+    elif "," in scw_input:
+        scws = [s.strip() for s in scw_input.split(",") if s.strip()]
+    else:
+        scws = [scw_input.strip()]
+
+    formatted_scws = [f"{s}.001" if (len(s) == 12 and not s.endswith(".001")) else s for s in scws]
+    scw_file.write_text("\n".join(formatted_scws) + "\n")
+
+    target_image = image or config.docker_image
+
+    bash_pipeline = f"""
+    set -e
+    [ -f /init.sh ] && source /init.sh 2>/dev/null || true
+    [ -f /opt/osa/bin/isdc_init_env.sh ] && source /opt/osa/bin/isdc_init_env.sh 2>/dev/null || true
+
+    export ISDC_ENV=/opt/osa
+    export REP_BASE_PROD=/data
+    export CFITSIO_INCLUDE_FILES=/opt/osa/templates
+    export ISDC_REF_CAT="/data/cat/hec/gnrl_refr_cat_0043.fits"
+    export HOME=/home/integral
+    export PFILES="/home/integral/pfiles;/opt/osa/pfiles"
+    mkdir -pv /home/integral/pfiles
+    export DISPLAY=""
+
+    cd /home/integral
+
+    echo "=== 1. Initializing Observation Group ({og_name}) ==="
+    og_create idxSwg="scw.list" \
+              instrument="OMC" \
+              ogid="{og_name}" \
+              baseDir="./" \
+              obsDir="obs"
+
+    echo "=== 2. Running omc_science_analysis ==="
+    cd obs/{og_name}
+    omc_science_analysis \
+        startLevel="{start_level}" \
+        endLevel="{end_level}" \
+        IC_Group="/data/idx/ic/ic_master_file.fits[1]" \
+        IC_Alias="OSA"
+    """
+
+    start_time = time.perf_counter()
+    try:
+        run_container(command=bash_pipeline, workdir=workdir, image=target_image)
+        elapsed_sec = time.perf_counter() - start_time
+        console.print(f"[bold green]✓ OMC pipeline completed in {elapsed_sec:.2f}s ({elapsed_sec/len(scws):.2f}s per ScW)[/bold green]")
+    except Exception as e:
+        elapsed_sec = time.perf_counter() - start_time
+        console.print(f"[bold red]OMC pipeline stopped after {elapsed_sec:.2f}s: {e}[/bold red]")
+        raise typer.Exit(code=1)
+
+
+@analysis_app.command("spi")
+def run_spi(
+    scw_input: str = typer.Argument(
+        ...,
+        help="Science Window ID (e.g. 006000010010), comma-separated list, or revolution (e.g. 'rev:0060:5')",
+    ),
+    start_level: str = typer.Option("COR", "--start-level", help="Start level (COR, DEAD, POINT, BKG, SPIROS, SPIMODFIT)"),
+    end_level: str = typer.Option("SPIROS", "--end-level", help="End level (COR, DEAD, POINT, BKG, SPIROS, SPIMODFIT)"),
+    image: Optional[str] = typer.Option(None, "--image", "-i", help="Docker image to run"),
+    workdir: Path = typer.Option(Path.cwd() / "work", "--workdir", "-w", help="Working directory for analysis"),
+    og_name: str = typer.Option("obs_spi", "--og", "-o", help="Observation group name"),
+    clean: bool = typer.Option(True, "--clean/--no-clean", help="Clean prior observation group directory before run"),
+):
+    """Run SPI science analysis pipeline (spi_science_analysis) with native ARM64 container."""
+    workdir.mkdir(parents=True, exist_ok=True)
+    scw_file = workdir / "scw.list"
+    obs_dir = workdir / "obs" / og_name
+
+    if clean and obs_dir.exists():
+        shutil.rmtree(obs_dir)
+
+    scws = []
+    if scw_input.startswith("rev:"):
+        parts = scw_input.split(":")
+        rev_id = f"{int(parts[1]):04d}"
+        limit = int(parts[2]) if len(parts) > 2 else None
+        scw_dir = config.rep_base_prod / "scw" / rev_id
+        if not scw_dir.exists():
+            console.print(f"[bold red]Error: Revolution {rev_id} directory {scw_dir} does not exist.[/bold red]")
+            raise typer.Exit(code=1)
+        found_scws = sorted([d.name.split(".")[0] for d in scw_dir.iterdir() if d.is_dir() and d.name.startswith(rev_id) and d.name.split(".")[0].endswith("0010")])
+        if not found_scws:
+            found_scws = sorted([d.name.split(".")[0] for d in scw_dir.iterdir() if d.is_dir() and len(d.name) >= 12])
+        scws = found_scws[:limit] if limit else found_scws
+    elif Path(scw_input).exists():
+        scws = [line.strip() for line in Path(scw_input).read_text().splitlines() if line.strip() and not line.startswith("#")]
+    elif "," in scw_input:
+        scws = [s.strip() for s in scw_input.split(",") if s.strip()]
+    else:
+        scws = [scw_input.strip()]
+
+    formatted_scws = [f"{s}.001" if (len(s) == 12 and not s.endswith(".001")) else s for s in scws]
+    scw_file.write_text("\n".join(formatted_scws) + "\n")
+
+    target_image = image or config.docker_image
+
+    bash_pipeline = f"""
+    set -e
+    [ -f /init.sh ] && source /init.sh 2>/dev/null || true
+    [ -f /opt/osa/bin/isdc_init_env.sh ] && source /opt/osa/bin/isdc_init_env.sh 2>/dev/null || true
+
+    export ISDC_ENV=/opt/osa
+    export REP_BASE_PROD=/data
+    export CFITSIO_INCLUDE_FILES=/opt/osa/templates
+    export ISDC_REF_CAT="/data/cat/hec/gnrl_refr_cat_0043.fits"
+    export HOME=/home/integral
+    export PFILES="/home/integral/pfiles;/opt/osa/pfiles"
+    mkdir -pv /home/integral/pfiles
+    export DISPLAY=""
+
+    cd /home/integral
+
+    echo "=== 1. Initializing Observation Group ({og_name}) ==="
+    og_create idxSwg="scw.list" \
+              instrument="SPI" \
+              ogid="{og_name}" \
+              baseDir="./" \
+              obsDir="obs"
+
+    echo "=== 2. Running spi_science_analysis ==="
+    cd obs/{og_name}
+    spi_science_analysis \
+        startLevel="{start_level}" \
+        endLevel="{end_level}" \
+        IC_Group="/data/idx/ic/ic_master_file.fits[1]" \
+        IC_Alias="OSA"
+    """
+
+    start_time = time.perf_counter()
+    try:
+        run_container(command=bash_pipeline, workdir=workdir, image=target_image)
+        elapsed_sec = time.perf_counter() - start_time
+        console.print(f"[bold green]✓ SPI pipeline completed in {elapsed_sec:.2f}s ({elapsed_sec/len(scws):.2f}s per ScW)[/bold green]")
+    except Exception as e:
+        elapsed_sec = time.perf_counter() - start_time
+        console.print(f"[bold red]SPI pipeline stopped after {elapsed_sec:.2f}s: {e}[/bold red]")
+        raise typer.Exit(code=1)
+
