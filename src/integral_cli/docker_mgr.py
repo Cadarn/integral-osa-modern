@@ -29,8 +29,8 @@ def build_image(
     no_cache: bool = typer.Option(False, "--no-cache", help="Build image without using cache"),
 ):
     """Build the optimized INTEGRAL OSA Docker container image for local hardware."""
-    project_root = Path(__file__).resolve().parents[2]
-    docker_dir = project_root / "osa-docker"
+    project_root = Path(__file__).resolve().parent.parent.parent
+    docker_dir = project_root / "docker"
 
     if arch == "auto":
         target_arch = config.host_arch

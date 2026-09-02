@@ -27,17 +27,18 @@ jobs:
       matrix:
         include:
           - name: native-arm64
-            dockerfile: osa-docker/Dockerfile.native-arm64
+            dockerfile: docker/Dockerfile.native-arm64
             platforms: linux/arm64
             tag_suffix: 11-native-arm64
           - name: modern-x86
-            dockerfile: osa-docker/Dockerfile.modern
+            dockerfile: docker/Dockerfile.modern
             platforms: linux/amd64
             tag_suffix: 11-modern-amd64
           - name: batch-pipeline
-            dockerfile: osa-docker/Dockerfile.batch
+            dockerfile: docker/Dockerfile.batch
             platforms: linux/amd64,linux/arm64
             tag_suffix: 11-batch
+
 
     steps:
       - name: Checkout Code
