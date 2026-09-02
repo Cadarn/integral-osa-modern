@@ -115,11 +115,10 @@ Two independent workflows:
   `native-arm64` only runs on tag pushes or manual dispatch with `build_arm64=true` (it's the slow
   QEMU cross-build) — it is skipped on ordinary PRs/pushes. Uses GHA layer caching
   (`cache-from`/`cache-to: type=gha`) scoped per matrix entry.
-- `.github/workflows/python-ci.yml` — runs `ruff check .` (non-blocking — pre-existing lint debt
-  outside `analysis.py`/`config.py`/`benchmark.py`/`docker_mgr.py`/`viewer.py` is tracked but not
-  yet fixed), `pyright src` (blocking, currently clean), and `pytest` (blocking) on every push/PR
-  touching `src/`, `scripts/`, `pipeline/`, `tests/`, or `pyproject.toml`/`uv.lock`. Type checking
-  uses Pyright rather than mypy — mypy's `ignore_missing_imports` was silently skipping real type
+- `.github/workflows/python-ci.yml` — runs `ruff check .`, `pyright src`, and `pytest`, all
+  blocking, on every push/PR touching `src/`, `scripts/`, `pipeline/`, `tests/`, or
+  `pyproject.toml`/`uv.lock`. Type checking uses Pyright rather than mypy — mypy's
+  `ignore_missing_imports` was silently skipping real type
   errors in astropy-touching code (see `viewer.py`/`benchmark.py`'s `# pyright: ignore[...]`
   comments for astropy's own stub imprecisions that Pyright does catch and that are suppressed
   deliberately, one rule+line at a time, rather than a blanket ignore).

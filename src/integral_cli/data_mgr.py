@@ -2,17 +2,21 @@
 Local Data Management, HEASARC Async HTTP/2 Downloaders, and Staging Tools for INTEGRAL.
 """
 
-from pathlib import Path
 import asyncio
-import os
 import re
 import shutil
-from typing import List, Optional
+from pathlib import Path
+
 import httpx
 import typer
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, DownloadColumn, TransferSpeedColumn
 from rich.panel import Panel
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+)
 from rich.table import Table
 
 from integral_cli.config import config
@@ -27,7 +31,7 @@ async def async_download_file(
     client: httpx.AsyncClient,
     url: str,
     dest_path: Path,
-    progress: Optional[Progress] = None,
+    progress: Progress | None = None,
     task_id=None,
 ) -> bool:
     """Asynchronously download a file with atomic .tmp write and resume safety."""
@@ -42,13 +46,18 @@ async def async_download_file(
             if response.status_code != 200:
                 return False
 
-            with open(temp_path, "wb") as f:
+            # Blocking file I/O inside an async function - a real anti-pattern, but fixing it
+            # properly needs either the `aiofiles` dependency or per-chunk asyncio.to_thread
+            # (which would add thread-pool overhead on every 64KB chunk). Deferred rather than
+            # fixed here; each concurrent download's disk writes briefly block the event loop.
+            with open(temp_path, "wb") as f:  # noqa: ASYNC230
                 async for chunk in response.aiter_bytes(chunk_size=65536):
                     f.write(chunk)
 
         temp_path.rename(dest_path)
         return True
     except Exception as e:
+        console.print(f"[dim red]Warning: failed to download {url}: {e}[/dim red]")
         if temp_path.exists():
             temp_path.unlink()
         return False
@@ -101,7 +110,7 @@ async def async_download_ic_index(client: httpx.AsyncClient, dest_base: Path):
             return
 
         file_matches = re.findall(r'href="([^"?/]+\.fits(?:\.gz)?)"', resp.text)
-        fits_files = sorted(list(set(file_matches)))
+        fits_files = sorted(set(file_matches))
 
         console.print(f"Downloading {len(fits_files)} IC index files via async HTTP/2...")
         tasks = []
@@ -159,7 +168,7 @@ async def scan_and_download_ic_dir(
                 task_id,
             )
     except Exception as e:
-        pass
+        console.print(f"[dim red]Warning: failed to scan IC directory {base_url}: {e}[/dim red]")
 
 
 async def async_download_ic_tree(
