@@ -5,12 +5,12 @@ Scientific validation tool to compare FITS products across ARM64 vs x86_64 or te
 """
 
 from pathlib import Path
-import sys
-from astropy.io import fits
+
 import numpy as np
+import typer
+from astropy.io import fits
 from rich.console import Console
 from rich.table import Table
-import typer
 
 app = typer.Typer(help="INTEGRAL FITS Science Product Validator")
 console = Console()
