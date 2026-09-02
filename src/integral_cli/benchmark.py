@@ -5,17 +5,17 @@ Benchmarking suite for comparing INTEGRAL OSA execution across:
 3. End-to-End Scientific Reduction & Mosaicing
 """
 
-from pathlib import Path
 import json
 import time
-from typing import Optional
+from pathlib import Path
+
 import typer
+from astropy.io import fits
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
 from integral_cli.config import config
-from integral_cli.docker_mgr import run_container
 
 console = Console()
 benchmark_app = typer.Typer(help="Run performance benchmarks and multi-tier comparisons")
@@ -27,7 +27,7 @@ def run_benchmark(
     e_min: str = typer.Option("18", "--e-min", help="Minimum energy in keV"),
     e_max: str = typer.Option("60", "--e-max", help="Maximum energy in keV"),
     workdir: Path = typer.Option(Path.cwd() / "work_bench", "--workdir", "-w", help="Working directory for benchmark"),
-    output_json: Optional[Path] = typer.Option(Path.cwd() / "benchmark_results.json", "--output", "-o", help="JSON output file for benchmark metrics"),
+    output_json: Path | None = typer.Option(Path.cwd() / "benchmark_results.json", "--output", "-o", help="JSON output file for benchmark metrics"),
 ):
     """Run comparative benchmark across legacy emulation vs native modernized components."""
     workdir.mkdir(parents=True, exist_ok=True)
@@ -49,12 +49,11 @@ def run_benchmark(
     console.print("\n[bold cyan]1. Benchmarking Layer 1: Native ARM64 Python/Astropy Data Stack...[/bold cyan]")
     t0 = time.perf_counter()
     try:
-        from astropy.io import fits
-        import numpy as np
-
         cat_file = config.rep_base_prod / "cat" / "hec" / "gnrl_refr_cat_0043.fits"
         with fits.open(cat_file) as hdul:
-            data = hdul[1].data
+            # astropy's HDUList.__getitem__ stub returns HDUList instead of the actual HDU
+            # subtype, so pyright can't see `.data` here even though it exists at runtime.
+            data = hdul[1].data  # pyright: ignore[reportAttributeAccessIssue]
             # Simulate coordinate filtering and flux cut
             bright_sources = data[data["ISGRI_FLAG"] > 0]
             count = len(bright_sources)
@@ -96,11 +95,12 @@ def run_benchmark(
         if mosa_res.exists():
             with fits.open(mosa_res) as hdul:
                 for h in hdul:
-                    if h.data is not None and getattr(h.data, "names", None) and "DETSIG" in h.data.names:
-                        source_count = len(h.data)
+                    # Same astropy HDUList/HDU stub imprecision as above.
+                    if h.data is not None and getattr(h.data, "names", None) and "DETSIG" in h.data.names:  # pyright: ignore[reportAttributeAccessIssue]
+                        source_count = len(h.data)  # pyright: ignore[reportAttributeAccessIssue]
                         if source_count > 0:
-                            top_source = str(h.data["NAME"][0]).strip()
-                            top_snr = float(h.data["DETSIG"][0])
+                            top_source = str(h.data["NAME"][0]).strip()  # pyright: ignore[reportAttributeAccessIssue]
+                            top_snr = float(h.data["DETSIG"][0])  # pyright: ignore[reportAttributeAccessIssue]
                         break
 
         results["full_reduction"] = {
@@ -130,7 +130,7 @@ def run_benchmark(
     if "layer1_native_python" in results and results["layer1_native_python"]["status"] == "SUCCESS":
         l1 = results["layer1_native_python"]
         table.add_row(
-            l1["name"],
+            str(l1["name"]),
             f"{l1['time_sec']:.4f}s",
             f"Zero-emulation Apple Silicon FITS indexing ({l1['sources_indexed']} sources)",
             "[bold green]PASS[/bold green]",
@@ -139,7 +139,7 @@ def run_benchmark(
     if "full_reduction" in results and results["full_reduction"]["status"] == "SUCCESS":
         fr = results["full_reduction"]
         table.add_row(
-            fr["name"],
+            str(fr["name"]),
             f"{fr['time_sec']:.2f}s",
             f"Detected {fr['sources_detected']} sources (Top: {fr['top_source']} at {fr['top_snr']:.1f}σ)",
             "[bold green]PASS[/bold green]",

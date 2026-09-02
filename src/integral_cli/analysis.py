@@ -2,14 +2,13 @@
 Analysis execution and benchmarking helpers for INTEGRAL instruments (IBIS, JEM-X, SPI).
 """
 
-from pathlib import Path
 import shutil
 import time
-from typing import Optional
+from pathlib import Path
+
 import typer
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 
 from integral_cli.config import config
 from integral_cli.docker_mgr import run_container
@@ -52,7 +51,7 @@ def run_ibis(
     e_min: str = typer.Option("18", "--e-min", help="Minimum energy in keV (default: 18)"),
     e_max: str = typer.Option("60", "--e-max", help="Maximum energy in keV (default: 60)"),
     start_level: str = typer.Option("DEAD", "--start-level", help="Pipeline start level (COR, GTI, DEAD, BIN_I, CAT_I, IMA)"),
-    image: Optional[str] = typer.Option(None, "--image", "-i", help="Docker image to run (default: config.docker_image)"),
+    image: str | None = typer.Option(None, "--image", "-i", help="Docker image to run (default: config.docker_image)"),
     workdir: Path = typer.Option(Path.cwd() / "work", "--workdir", "-w", help="Working directory for analysis"),
     og_name: str = typer.Option("obs_ibis", "--og", "-o", help="Observation group name"),
     mosaic: bool = typer.Option(True, "--mosaic/--no-mosaic", help="Run multi-ScW mosaicing stage (IMA2)"),
@@ -162,7 +161,7 @@ def run_jemx(
     jemx_unit: int = typer.Option(1, "--unit", "-u", help="JEM-X unit number (1 or 2, default: 1)"),
     start_level: str = typer.Option("COR", "--start-level", help="Start level (COR, DEAD, BIN_I, IMA, IMA2)"),
     end_level: str = typer.Option("IMA2", "--end-level", help="End level (IMA, IMA2, SPE, LCR)"),
-    image: Optional[str] = typer.Option(None, "--image", "-i", help="Docker image to run"),
+    image: str | None = typer.Option(None, "--image", "-i", help="Docker image to run"),
     workdir: Path = typer.Option(Path.cwd() / "work", "--workdir", "-w", help="Working directory for analysis"),
     og_name: str = typer.Option("obs_jemx", "--og", "-o", help="Observation group name"),
     clean: bool = typer.Option(True, "--clean/--no-clean", help="Clean prior observation group directory before run"),
@@ -256,7 +255,7 @@ def run_omc(
     ),
     start_level: str = typer.Option("COR", "--start-level", help="Start level (COR, IMA)"),
     end_level: str = typer.Option("IMA", "--end-level", help="End level (COR, IMA)"),
-    image: Optional[str] = typer.Option(None, "--image", "-i", help="Docker image to run"),
+    image: str | None = typer.Option(None, "--image", "-i", help="Docker image to run"),
     workdir: Path = typer.Option(Path.cwd() / "work", "--workdir", "-w", help="Working directory for analysis"),
     og_name: str = typer.Option("obs_omc", "--og", "-o", help="Observation group name"),
     clean: bool = typer.Option(True, "--clean/--no-clean", help="Clean prior observation group directory before run"),
@@ -328,7 +327,7 @@ def run_spi(
     ),
     start_level: str = typer.Option("COR", "--start-level", help="Start level (COR, DEAD, POINT, BKG, SPIROS, SPIMODFIT)"),
     end_level: str = typer.Option("SPIROS", "--end-level", help="End level (COR, DEAD, POINT, BKG, SPIROS, SPIMODFIT)"),
-    image: Optional[str] = typer.Option(None, "--image", "-i", help="Docker image to run"),
+    image: str | None = typer.Option(None, "--image", "-i", help="Docker image to run"),
     workdir: Path = typer.Option(Path.cwd() / "work", "--workdir", "-w", help="Working directory for analysis"),
     og_name: str = typer.Option("obs_spi", "--og", "-o", help="Observation group name"),
     clean: bool = typer.Option(True, "--clean/--no-clean", help="Clean prior observation group directory before run"),

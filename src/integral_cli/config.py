@@ -2,11 +2,12 @@
 Configuration and environment manager for INTEGRAL OSA CLI.
 """
 
-from pathlib import Path
 import json
 import os
 import platform
 import sys
+from pathlib import Path
+
 from pydantic import BaseModel, Field
 
 CONFIG_FILE = Path.home() / ".integralrc.json"

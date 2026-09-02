@@ -25,7 +25,7 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "ruff>=0.3.0",
-    "mypy>=1.9.0",
+    "pyright>=1.1.400",
 ]
 
 [project.scripts]
@@ -45,7 +45,15 @@ packages = ["src/integral_cli", "scripts", "pipeline"]
 line-length = 100
 target-version = "py310"
 
-[tool.mypy]
-python_version = "3.10"
-strict = false
-ignore_missing_imports = true
+[tool.ruff.lint]
+ignore = [
+    "B008",   # typer.Option()/typer.Argument()/Path.cwd() as call defaults is the idiomatic Typer pattern
+    "BLE001", # top-level CLI command handlers intentionally catch-all to print a friendly error and exit 1
+]
+
+[tool.pyright]
+pythonVersion = "3.12"
+include = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

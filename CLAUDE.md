@@ -35,14 +35,13 @@ uv run integral benchmark <...>
 uv run integral docker build --arch auto
 uv run integral docker run
 
-# Lint / type-check (config in pyproject.toml, no wired-up make/CI task — run directly)
+# Lint / type-check (config in pyproject.toml; also run in CI, see below)
 uv run ruff check .
-uv run mypy src
+uv run pyright src
 
-# Tests (pytest + pytest-asyncio declared as dev deps; no test suite exists yet — write to
-# src/integral_cli/ conventions using pytest when adding tests)
+# Tests (tests/, mirrors src/integral_cli/ layout)
 uv run pytest
-uv run pytest path/to/test_file.py::test_name   # single test
+uv run pytest tests/test_analysis.py::test_bare_scw_id_passthrough   # single test
 
 # Docker images (definitions in docker/, matrix built by .github/workflows/docker-build-publish.yml)
 docker build --platform linux/arm64 -t integralsw/osa:11-native-arm64 -f docker/Dockerfile.native-arm64 .
@@ -108,12 +107,22 @@ config.sub ARM64 detection, `-fallow-argument-mismatch` for modern gfortran, res
 renames, etc.) — see `docs/technical_rebuild_arm64.md` for the full catalogue of build fixes if
 touching the native-arm64 build.
 
-### CI (`.github/workflows/docker-build-publish.yml`)
+### CI
 
-Matrix-builds `modern-x86`, `batch-pipeline` (multi-arch), and `native-arm64` images and pushes to
-Docker Hub (`integralsw/osa`). `native-arm64` only runs on tag pushes or manual dispatch with
-`build_arm64=true` (it's the slow QEMU cross-build) — it is skipped on ordinary PRs/pushes. Uses
-GHA layer caching (`cache-from`/`cache-to: type=gha`) scoped per matrix entry.
+Two independent workflows:
+- `.github/workflows/docker-build-publish.yml` — matrix-builds `modern-x86`, `batch-pipeline`
+  (multi-arch), and `native-arm64` images and pushes to Docker Hub (`integralsw/osa`).
+  `native-arm64` only runs on tag pushes or manual dispatch with `build_arm64=true` (it's the slow
+  QEMU cross-build) — it is skipped on ordinary PRs/pushes. Uses GHA layer caching
+  (`cache-from`/`cache-to: type=gha`) scoped per matrix entry.
+- `.github/workflows/python-ci.yml` — runs `ruff check .` (non-blocking — pre-existing lint debt
+  outside `analysis.py`/`config.py`/`benchmark.py`/`docker_mgr.py`/`viewer.py` is tracked but not
+  yet fixed), `pyright src` (blocking, currently clean), and `pytest` (blocking) on every push/PR
+  touching `src/`, `scripts/`, `pipeline/`, `tests/`, or `pyproject.toml`/`uv.lock`. Type checking
+  uses Pyright rather than mypy — mypy's `ignore_missing_imports` was silently skipping real type
+  errors in astropy-touching code (see `viewer.py`/`benchmark.py`'s `# pyright: ignore[...]`
+  comments for astropy's own stub imprecisions that Pyright does catch and that are suppressed
+  deliberately, one rule+line at a time, rather than a blanket ignore).
 
 ### Cloud/batch path (`pipeline/`, `k8s/`)
 

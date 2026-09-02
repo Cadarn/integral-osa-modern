@@ -3,7 +3,7 @@ Image and source visualisation helpers for INTEGRAL data products (FITS images, 
 """
 
 from pathlib import Path
-from typing import Optional
+
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -15,9 +15,9 @@ view_app = typer.Typer(help="Inspect and visualise INTEGRAL FITS products and so
 @view_app.command("image")
 def view_image(
     fits_path: Path = typer.Argument(..., help="Path to FITS image file (e.g. isgri_mosa_ima.fits, isgri_sky_ima.fits)"),
-    ext: Optional[int] = typer.Option(None, "--ext", "-e", help="Optional extension number (HDU index) to render"),
-    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Optional output PNG image path"),
-    title: Optional[str] = typer.Option(None, "--title", "-t", help="Plot title"),
+    ext: int | None = typer.Option(None, "--ext", "-e", help="Optional extension number (HDU index) to render"),
+    output: Path | None = typer.Option(None, "--output", "-o", help="Optional output PNG image path"),
+    title: str | None = typer.Option(None, "--title", "-t", help="Plot title"),
 ):
     """Render a 2D FITS image with WCS equatorial coordinates and save/display."""
     if not fits_path.exists():
@@ -25,9 +25,9 @@ def view_image(
         raise typer.Exit(code=1)
 
     try:
-        from astropy.io import fits
-        from astropy.visualization import ZScaleInterval, ImageNormalize
         import matplotlib
+        from astropy.io import fits
+        from astropy.visualization import ImageNormalize, ZScaleInterval
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         from astropy.wcs import WCS
@@ -36,7 +36,9 @@ def view_image(
             target_hdu = None
             if ext is not None and ext < len(hdul):
                 h = hdul[ext]
-                if getattr(h, "data", None) is not None and getattr(h.data, "ndim", 0) == 2:
+                # astropy's HDUList.__getitem__ stub returns HDUList instead of the actual HDU
+                # subtype, so pyright can't see `.data` here even though it exists at runtime.
+                if getattr(h, "data", None) is not None and getattr(h.data, "ndim", 0) == 2:  # pyright: ignore[reportAttributeAccessIssue]
                     target_hdu = h
 
             if target_hdu is None:
@@ -50,8 +52,9 @@ def view_image(
                 console.print(f"[bold red]Error: No 2D image HDU found in {fits_path.name}.[/bold red]")
                 raise typer.Exit(code=1)
 
-            data = target_hdu.data
-            header = target_hdu.header
+            # Same astropy HDUList/HDU stub imprecision as above.
+            data = target_hdu.data  # pyright: ignore[reportAttributeAccessIssue]
+            header = target_hdu.header  # pyright: ignore[reportAttributeAccessIssue]
             wcs = WCS(header) if "CRVAL1" in header else None
 
             fig = plt.figure(figsize=(10, 8), dpi=150)
@@ -66,11 +69,13 @@ def view_image(
                 ax.set_ylabel("Y (pixels)")
 
             norm = ImageNormalize(data, interval=ZScaleInterval())
-            im = ax.imshow(data, cmap="inferno", origin="lower", norm=norm)
+            # ImageNormalize genuinely subclasses matplotlib's Normalize at runtime; astropy's
+            # stub just doesn't declare that relationship for the type checker.
+            im = ax.imshow(data, cmap="inferno", origin="lower", norm=norm)  # pyright: ignore[reportArgumentType]
             cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
             cbar.set_label("Flux / Significance (Counts)", fontsize=10)
 
-            plot_title = title or f"{fits_path.name} [{target_hdu.name}]"
+            plot_title = title or f"{fits_path.name} [{target_hdu.name}]"  # pyright: ignore[reportAttributeAccessIssue]
             ax.set_title(plot_title, fontsize=13, fontweight="bold", pad=12)
 
             out_file = output or (fits_path.parent / f"{fits_path.stem}.png")
@@ -78,7 +83,7 @@ def view_image(
             plt.savefig(out_file, bbox_inches="tight")
             plt.close(fig)
 
-            console.print(f"[bold green]✓ Rendered {fits_path.name} [{target_hdu.name}] -> {out_file}[/bold green]")
+            console.print(f"[bold green]✓ Rendered {fits_path.name} [{target_hdu.name}] -> {out_file}[/bold green]")  # pyright: ignore[reportAttributeAccessIssue]
 
     except Exception as e:
         console.print(f"[bold red]Failed to visualise FITS image: {e}[/bold red]")
@@ -101,7 +106,8 @@ def view_sources(
         with fits.open(fits_path) as hdul:
             src_table = None
             for h in hdul:
-                if h.data is not None and getattr(h.data, "names", None) and any(n in h.data.names for n in ["NAME", "SOURCE_ID", "DETSIG", "SNR"]):
+                # Same astropy HDUList/HDU stub imprecision as in view_image() above.
+                if h.data is not None and getattr(h.data, "names", None) and any(n in h.data.names for n in ["NAME", "SOURCE_ID", "DETSIG", "SNR"]):  # pyright: ignore[reportAttributeAccessIssue]
                     src_table = h
                     break
 
@@ -109,7 +115,7 @@ def view_sources(
                 console.print(f"[bold red]Error: No source catalog/results table found in {fits_path.name}.[/bold red]")
                 raise typer.Exit(code=1)
 
-            data = src_table.data
+            data = src_table.data  # pyright: ignore[reportAttributeAccessIssue]
             cols = data.names
 
             name_col = "NAME" if "NAME" in cols else ("SOURCE_ID" if "SOURCE_ID" in cols else cols[0])
@@ -140,7 +146,7 @@ def view_sources(
                     table.add_row(name, ra, dec, f"{snr:.1f}", flux_str)
 
             console.print(table)
-            console.print(f"[dim]Total: {count} sources detected with SNR ≥ {min_snr}σ (Table: {src_table.name})[/dim]")
+            console.print(f"[dim]Total: {count} sources detected with SNR ≥ {min_snr}σ (Table: {src_table.name})[/dim]")  # pyright: ignore[reportAttributeAccessIssue]
 
     except Exception as e:
         console.print(f"[bold red]Failed to view sources: {e}[/bold red]")
