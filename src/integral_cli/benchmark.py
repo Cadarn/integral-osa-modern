@@ -39,7 +39,8 @@ def run_benchmark(
             f"• Target Dataset:   [cyan]{scw_input}[/cyan]\n"
             f"• Energy Range:     [cyan]{e_min} - {e_max} keV[/cyan]\n"
             f"• Working Directory:[cyan]{workdir}[/cyan]\n"
-            f"• Host Platform:    [cyan]{config.platform} (Apple Silicon ARM64)[/cyan]",
+            f"• Host Platform:    [cyan]{config.host_arch} (Apple Silicon ARM64)[/cyan]",
+
             title="Benchmark Suite",
         )
     )

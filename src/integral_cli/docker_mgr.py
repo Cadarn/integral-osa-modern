@@ -38,13 +38,14 @@ def build_image(
         target_arch = arch
 
     if target_arch == "arm64":
-        dockerfile = docker_dir / "Dockerfile.arm64"
-        image_name = f"integralsw/osa:{tag}-arm64"
+        dockerfile = docker_dir / "Dockerfile.native-arm64"
+        image_name = f"integralsw/osa:{tag}-native-arm64" if tag != "latest" else "integralsw/osa:11-native-arm64"
         platform_arg = "--platform=linux/arm64"
     else:
-        dockerfile = docker_dir / "Dockerfile.x86"
-        image_name = f"integralsw/osa:{tag}-x86"
+        dockerfile = docker_dir / "Dockerfile.modern"
+        image_name = f"integralsw/osa:{tag}-modern-amd64" if tag != "latest" else "integralsw/osa:11-modern-amd64"
         platform_arg = "--platform=linux/amd64"
+
 
     console.print(
         Panel(
