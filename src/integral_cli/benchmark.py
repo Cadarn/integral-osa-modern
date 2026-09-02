@@ -130,7 +130,7 @@ def run_benchmark(
     if "layer1_native_python" in results and results["layer1_native_python"]["status"] == "SUCCESS":
         l1 = results["layer1_native_python"]
         table.add_row(
-            l1["name"],
+            str(l1["name"]),
             f"{l1['time_sec']:.4f}s",
             f"Zero-emulation Apple Silicon FITS indexing ({l1['sources_indexed']} sources)",
             "[bold green]PASS[/bold green]",
@@ -139,7 +139,7 @@ def run_benchmark(
     if "full_reduction" in results and results["full_reduction"]["status"] == "SUCCESS":
         fr = results["full_reduction"]
         table.add_row(
-            fr["name"],
+            str(fr["name"]),
             f"{fr['time_sec']:.2f}s",
             f"Detected {fr['sources_detected']} sources (Top: {fr['top_source']} at {fr['top_snr']:.1f}σ)",
             "[bold green]PASS[/bold green]",

@@ -83,7 +83,7 @@ def build_image(
 
 def find_symlink_targets(base_path: Path) -> Set[Path]:
     """Find all unique external parent directories targeted by symlinks."""
-    targets = set()
+    targets: Set[Path] = set()
     if not base_path.exists():
         return targets
 
