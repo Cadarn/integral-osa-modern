@@ -5,17 +5,17 @@ Benchmarking suite for comparing INTEGRAL OSA execution across:
 3. End-to-End Scientific Reduction & Mosaicing
 """
 
-from pathlib import Path
 import json
 import time
-from typing import Optional
+from pathlib import Path
+
 import typer
+from astropy.io import fits
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
 from integral_cli.config import config
-from integral_cli.docker_mgr import run_container
 
 console = Console()
 benchmark_app = typer.Typer(help="Run performance benchmarks and multi-tier comparisons")
@@ -27,7 +27,7 @@ def run_benchmark(
     e_min: str = typer.Option("18", "--e-min", help="Minimum energy in keV"),
     e_max: str = typer.Option("60", "--e-max", help="Maximum energy in keV"),
     workdir: Path = typer.Option(Path.cwd() / "work_bench", "--workdir", "-w", help="Working directory for benchmark"),
-    output_json: Optional[Path] = typer.Option(Path.cwd() / "benchmark_results.json", "--output", "-o", help="JSON output file for benchmark metrics"),
+    output_json: Path | None = typer.Option(Path.cwd() / "benchmark_results.json", "--output", "-o", help="JSON output file for benchmark metrics"),
 ):
     """Run comparative benchmark across legacy emulation vs native modernized components."""
     workdir.mkdir(parents=True, exist_ok=True)
@@ -49,9 +49,6 @@ def run_benchmark(
     console.print("\n[bold cyan]1. Benchmarking Layer 1: Native ARM64 Python/Astropy Data Stack...[/bold cyan]")
     t0 = time.perf_counter()
     try:
-        from astropy.io import fits
-        import numpy as np
-
         cat_file = config.rep_base_prod / "cat" / "hec" / "gnrl_refr_cat_0043.fits"
         with fits.open(cat_file) as hdul:
             data = hdul[1].data
