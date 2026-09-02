@@ -18,6 +18,31 @@ console = Console()
 analysis_app = typer.Typer(help="Run INTEGRAL scientific reduction pipelines and benchmarks")
 
 
+def _resolve_scw_ids(scw_input: str) -> list[str]:
+    """Resolve a revolution spec, scw.list path, comma-separated list, or bare ScW ID into IDs."""
+    if scw_input.startswith("rev:"):
+        parts = scw_input.split(":")
+        rev_id = f"{int(parts[1]):04d}"
+        limit = int(parts[2]) if len(parts) > 2 else None
+
+        scw_dir = config.rep_base_prod / "scw" / rev_id
+        if not scw_dir.exists():
+            console.print(f"[bold red]Error: Revolution {rev_id} directory {scw_dir} does not exist.[/bold red]")
+            raise typer.Exit(code=1)
+
+        # Select pointing Science Windows (ending in 0010)
+        found_scws = sorted([d.name.split(".")[0] for d in scw_dir.iterdir() if d.is_dir() and d.name.startswith(rev_id) and d.name.split(".")[0].endswith("0010")])
+        if not found_scws:
+            found_scws = sorted([d.name.split(".")[0] for d in scw_dir.iterdir() if d.is_dir() and len(d.name) >= 12])
+        return found_scws[:limit] if limit else found_scws
+    elif Path(scw_input).exists():
+        return [line.strip() for line in Path(scw_input).read_text().splitlines() if line.strip() and not line.startswith("#")]
+    elif "," in scw_input:
+        return [s.strip() for s in scw_input.split(",") if s.strip()]
+    else:
+        return [scw_input.strip()]
+
+
 @analysis_app.command("ibis")
 def run_ibis(
     scw_input: str = typer.Argument(
@@ -41,28 +66,7 @@ def run_ibis(
     if clean and obs_dir.exists():
         shutil.rmtree(obs_dir)
 
-    scws = []
-    if scw_input.startswith("rev:"):
-        parts = scw_input.split(":")
-        rev_id = f"{int(parts[1]):04d}"
-        limit = int(parts[2]) if len(parts) > 2 else None
-
-        scw_dir = config.rep_base_prod / "scw" / rev_id
-        if not scw_dir.exists():
-            console.print(f"[bold red]Error: Revolution {rev_id} directory {scw_dir} does not exist.[/bold red]")
-            raise typer.Exit(code=1)
-
-        # Select pointing Science Windows (ending in 0010)
-        found_scws = sorted([d.name.split(".")[0] for d in scw_dir.iterdir() if d.is_dir() and d.name.startswith(rev_id) and d.name.split(".")[0].endswith("0010")])
-        if not found_scws:
-            found_scws = sorted([d.name.split(".")[0] for d in scw_dir.iterdir() if d.is_dir() and len(d.name) >= 12])
-        scws = found_scws[:limit] if limit else found_scws
-    elif Path(scw_input).exists():
-        scws = [line.strip() for line in Path(scw_input).read_text().splitlines() if line.strip() and not line.startswith("#")]
-    elif "," in scw_input:
-        scws = [s.strip() for s in scw_input.split(",") if s.strip()]
-    else:
-        scws = [scw_input.strip()]
+    scws = _resolve_scw_ids(scw_input)
 
     if not scws:
         console.print("[bold red]No valid Science Windows found for analysis.[/bold red]")
@@ -98,7 +102,7 @@ def run_ibis(
     export ISDC_ENV=/opt/osa
     export REP_BASE_PROD=/data
     export CFITSIO_INCLUDE_FILES=/opt/osa/templates
-    export ISDC_REF_CAT="/data/cat/hec/gnrl_refr_cat_0043.fits"
+    export ISDC_REF_CAT="{config.ref_catalog}"
     export HOME=/home/integral
     export PFILES="/home/integral/pfiles;/opt/osa/pfiles"
     mkdir -pv /home/integral/pfiles
@@ -128,8 +132,8 @@ def run_ibis(
         SWITCH_disableIsgri="no" \
         SWITCH_disablePICsIT="yes" \
         SWITCH_disableCompton="yes" \
-        CAT_refCat="/data/cat/hec/gnrl_refr_cat_0043.fits[ISGRI_FLAG>0]" \
-        brSrcDOL="/data/cat/hec/gnrl_refr_cat_0043.fits[ISGRI_FLAG2==5&&ISGR_FLUX_1>100]" \
+        CAT_refCat="{config.ref_catalog}[ISGRI_FLAG>0]" \
+        brSrcDOL="{config.ref_catalog}[ISGRI_FLAG2==5&&ISGR_FLUX_1>100]" \
         IC_Group="/data/idx/ic/ic_master_file.fits[1]" \
         IC_Alias="OSA"
     """
@@ -171,25 +175,7 @@ def run_jemx(
     if clean and obs_dir.exists():
         shutil.rmtree(obs_dir)
 
-    scws = []
-    if scw_input.startswith("rev:"):
-        parts = scw_input.split(":")
-        rev_id = f"{int(parts[1]):04d}"
-        limit = int(parts[2]) if len(parts) > 2 else None
-        scw_dir = config.rep_base_prod / "scw" / rev_id
-        if not scw_dir.exists():
-            console.print(f"[bold red]Error: Revolution {rev_id} directory {scw_dir} does not exist.[/bold red]")
-            raise typer.Exit(code=1)
-        found_scws = sorted([d.name.split(".")[0] for d in scw_dir.iterdir() if d.is_dir() and d.name.startswith(rev_id) and d.name.split(".")[0].endswith("0010")])
-        if not found_scws:
-            found_scws = sorted([d.name.split(".")[0] for d in scw_dir.iterdir() if d.is_dir() and len(d.name) >= 12])
-        scws = found_scws[:limit] if limit else found_scws
-    elif Path(scw_input).exists():
-        scws = [line.strip() for line in Path(scw_input).read_text().splitlines() if line.strip() and not line.startswith("#")]
-    elif "," in scw_input:
-        scws = [s.strip() for s in scw_input.split(",") if s.strip()]
-    else:
-        scws = [scw_input.strip()]
+    scws = _resolve_scw_ids(scw_input)
 
     formatted_scws = [f"{s}.001" if (len(s) == 12 and not s.endswith(".001")) else s for s in scws]
     scw_file.write_text("\n".join(formatted_scws) + "\n")
@@ -217,7 +203,7 @@ def run_jemx(
     export ISDC_ENV=/opt/osa
     export REP_BASE_PROD=/data
     export CFITSIO_INCLUDE_FILES=/opt/osa/templates
-    export ISDC_REF_CAT="/data/cat/hec/gnrl_refr_cat_0043.fits"
+    export ISDC_REF_CAT="{config.ref_catalog}"
     export HOME=/home/integral
     export PFILES="/home/integral/pfiles;/opt/osa/pfiles"
     mkdir -pv /home/integral/pfiles
@@ -283,25 +269,7 @@ def run_omc(
     if clean and obs_dir.exists():
         shutil.rmtree(obs_dir)
 
-    scws = []
-    if scw_input.startswith("rev:"):
-        parts = scw_input.split(":")
-        rev_id = f"{int(parts[1]):04d}"
-        limit = int(parts[2]) if len(parts) > 2 else None
-        scw_dir = config.rep_base_prod / "scw" / rev_id
-        if not scw_dir.exists():
-            console.print(f"[bold red]Error: Revolution {rev_id} directory {scw_dir} does not exist.[/bold red]")
-            raise typer.Exit(code=1)
-        found_scws = sorted([d.name.split(".")[0] for d in scw_dir.iterdir() if d.is_dir() and d.name.startswith(rev_id) and d.name.split(".")[0].endswith("0010")])
-        if not found_scws:
-            found_scws = sorted([d.name.split(".")[0] for d in scw_dir.iterdir() if d.is_dir() and len(d.name) >= 12])
-        scws = found_scws[:limit] if limit else found_scws
-    elif Path(scw_input).exists():
-        scws = [line.strip() for line in Path(scw_input).read_text().splitlines() if line.strip() and not line.startswith("#")]
-    elif "," in scw_input:
-        scws = [s.strip() for s in scw_input.split(",") if s.strip()]
-    else:
-        scws = [scw_input.strip()]
+    scws = _resolve_scw_ids(scw_input)
 
     formatted_scws = [f"{s}.001" if (len(s) == 12 and not s.endswith(".001")) else s for s in scws]
     scw_file.write_text("\n".join(formatted_scws) + "\n")
@@ -316,7 +284,8 @@ def run_omc(
     export ISDC_ENV=/opt/osa
     export REP_BASE_PROD=/data
     export CFITSIO_INCLUDE_FILES=/opt/osa/templates
-    export ISDC_REF_CAT="/data/cat/hec/gnrl_refr_cat_0043.fits"
+    export ISDC_REF_CAT="{config.ref_catalog}"
+    export ISDC_OMC_CAT="{config.omc_catalog}"
     export HOME=/home/integral
     export PFILES="/home/integral/pfiles;/opt/osa/pfiles"
     mkdir -pv /home/integral/pfiles
@@ -372,25 +341,7 @@ def run_spi(
     if clean and obs_dir.exists():
         shutil.rmtree(obs_dir)
 
-    scws = []
-    if scw_input.startswith("rev:"):
-        parts = scw_input.split(":")
-        rev_id = f"{int(parts[1]):04d}"
-        limit = int(parts[2]) if len(parts) > 2 else None
-        scw_dir = config.rep_base_prod / "scw" / rev_id
-        if not scw_dir.exists():
-            console.print(f"[bold red]Error: Revolution {rev_id} directory {scw_dir} does not exist.[/bold red]")
-            raise typer.Exit(code=1)
-        found_scws = sorted([d.name.split(".")[0] for d in scw_dir.iterdir() if d.is_dir() and d.name.startswith(rev_id) and d.name.split(".")[0].endswith("0010")])
-        if not found_scws:
-            found_scws = sorted([d.name.split(".")[0] for d in scw_dir.iterdir() if d.is_dir() and len(d.name) >= 12])
-        scws = found_scws[:limit] if limit else found_scws
-    elif Path(scw_input).exists():
-        scws = [line.strip() for line in Path(scw_input).read_text().splitlines() if line.strip() and not line.startswith("#")]
-    elif "," in scw_input:
-        scws = [s.strip() for s in scw_input.split(",") if s.strip()]
-    else:
-        scws = [scw_input.strip()]
+    scws = _resolve_scw_ids(scw_input)
 
     formatted_scws = [f"{s}.001" if (len(s) == 12 and not s.endswith(".001")) else s for s in scws]
     scw_file.write_text("\n".join(formatted_scws) + "\n")
@@ -405,7 +356,7 @@ def run_spi(
     export ISDC_ENV=/opt/osa
     export REP_BASE_PROD=/data
     export CFITSIO_INCLUDE_FILES=/opt/osa/templates
-    export ISDC_REF_CAT="/data/cat/hec/gnrl_refr_cat_0043.fits"
+    export ISDC_REF_CAT="{config.ref_catalog}"
     export HOME=/home/integral
     export PFILES="/home/integral/pfiles;/opt/osa/pfiles"
     mkdir -pv /home/integral/pfiles

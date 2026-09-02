@@ -6,6 +6,7 @@ from pathlib import Path
 import json
 import os
 import platform
+import sys
 from pydantic import BaseModel, Field
 
 CONFIG_FILE = Path.home() / ".integralrc.json"
@@ -45,8 +46,8 @@ class IntegralConfig(BaseModel):
                 with open(CONFIG_FILE, "r") as f:
                     data = json.load(f)
                 return cls(**data)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"Warning: failed to read {CONFIG_FILE}, falling back to defaults: {e}", file=sys.stderr)
         config = cls()
         config.save()
         return config
@@ -55,8 +56,8 @@ class IntegralConfig(BaseModel):
         try:
             with open(CONFIG_FILE, "w") as f:
                 json.dump(self.model_dump(), f, indent=2)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Warning: failed to write {CONFIG_FILE}: {e}", file=sys.stderr)
 
 
 config = IntegralConfig.load()
