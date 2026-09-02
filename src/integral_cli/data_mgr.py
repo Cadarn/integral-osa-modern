@@ -11,7 +11,12 @@ import httpx
 import typer
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+)
 from rich.table import Table
 
 from integral_cli.config import config
@@ -70,7 +75,11 @@ async def async_download_file(
                     progress.advance(task_id, 1)
                 return False
 
-            with open(temp_path, "wb") as f:  # noqa: ASYNC230 (see async_download's own note)
+            # Blocking file I/O inside an async function - a real anti-pattern, but fixing it
+            # properly needs either the `aiofiles` dependency or per-chunk asyncio.to_thread
+            # (which would add thread-pool overhead on every 64KB chunk). Deferred rather than
+            # fixed here; each concurrent download's disk writes briefly block the event loop.
+            with open(temp_path, "wb") as f:  # noqa: ASYNC230
                 async for chunk in response.aiter_bytes(chunk_size=65536):
                     f.write(chunk)
 

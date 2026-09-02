@@ -45,9 +45,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
-      - name: Ruff (non-blocking - pre-existing lint debt is tracked separately)
+      - name: Ruff
         run: uv run ruff check .
-        continue-on-error: true
 
       - name: Pyright
         run: uv run pyright src
