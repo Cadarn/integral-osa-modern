@@ -3,16 +3,25 @@ name: Build and Publish OSA Docker Images
 on:
   push:
     branches: [ main ]
+    paths:
+      - 'docker/**'
+      - '.github/workflows/docker-build-publish.yml'
+      - 'pyproject.toml'
+      - 'uv.lock'
     tags: [ 'v*.*.*' ]
   pull_request:
     branches: [ main ]
+    paths:
+      - 'docker/**'
+      - '.github/workflows/docker-build-publish.yml'
   workflow_dispatch:
     inputs:
-      push_images:
-        description: 'Push images to Docker Hub?'
+      build_arm64:
+        description: 'Build native ARM64 image via QEMU? (Takes ~30-45m)'
         required: true
         type: boolean
-        default: true
+        default: false
+
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -24,18 +33,14 @@ permissions:
 
 jobs:
   build-and-publish:
-    name: Build & Publish Multi-Arch OSA Images (${{ matrix.name }})
+    name: Build & Publish OSA Images (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
+    if: matrix.name != 'native-arm64' || startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.build_arm64 == true)
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: native-arm64
-            dockerfile: docker/Dockerfile.native-arm64
-            platforms: linux/arm64
-            tag_suffix: 11-native-arm64
-            runner: ubuntu-latest
           - name: modern-x86
             dockerfile: docker/Dockerfile.modern
             platforms: linux/amd64
@@ -46,6 +51,12 @@ jobs:
             platforms: linux/amd64,linux/arm64
             tag_suffix: 11-batch
             runner: ubuntu-latest
+          - name: native-arm64
+            dockerfile: docker/Dockerfile.native-arm64
+            platforms: linux/arm64
+            tag_suffix: 11-native-arm64
+            runner: ubuntu-latest
+
 
 
 
