@@ -37,7 +37,7 @@ uv run integral docker run
 
 # Lint / type-check (config in pyproject.toml; also run in CI, see below)
 uv run ruff check .
-uv run mypy src
+uv run pyright src
 
 # Tests (tests/, mirrors src/integral_cli/ layout)
 uv run pytest
@@ -116,9 +116,13 @@ Two independent workflows:
   QEMU cross-build) — it is skipped on ordinary PRs/pushes. Uses GHA layer caching
   (`cache-from`/`cache-to: type=gha`) scoped per matrix entry.
 - `.github/workflows/python-ci.yml` — runs `ruff check .` (non-blocking — pre-existing lint debt
-  outside `analysis.py`/`config.py`/`benchmark.py`/`docker_mgr.py` is tracked but not yet fixed),
-  `mypy src` (blocking, currently clean), and `pytest` (blocking) on every push/PR touching
-  `src/`, `scripts/`, `pipeline/`, `tests/`, or `pyproject.toml`/`uv.lock`.
+  outside `analysis.py`/`config.py`/`benchmark.py`/`docker_mgr.py`/`viewer.py` is tracked but not
+  yet fixed), `pyright src` (blocking, currently clean), and `pytest` (blocking) on every push/PR
+  touching `src/`, `scripts/`, `pipeline/`, `tests/`, or `pyproject.toml`/`uv.lock`. Type checking
+  uses Pyright rather than mypy — mypy's `ignore_missing_imports` was silently skipping real type
+  errors in astropy-touching code (see `viewer.py`/`benchmark.py`'s `# pyright: ignore[...]`
+  comments for astropy's own stub imprecisions that Pyright does catch and that are suppressed
+  deliberately, one rule+line at a time, rather than a blanket ignore).
 
 ### Cloud/batch path (`pipeline/`, `k8s/`)
 

@@ -51,7 +51,9 @@ def run_benchmark(
     try:
         cat_file = config.rep_base_prod / "cat" / "hec" / "gnrl_refr_cat_0043.fits"
         with fits.open(cat_file) as hdul:
-            data = hdul[1].data
+            # astropy's HDUList.__getitem__ stub returns HDUList instead of the actual HDU
+            # subtype, so pyright can't see `.data` here even though it exists at runtime.
+            data = hdul[1].data  # pyright: ignore[reportAttributeAccessIssue]
             # Simulate coordinate filtering and flux cut
             bright_sources = data[data["ISGRI_FLAG"] > 0]
             count = len(bright_sources)
@@ -93,11 +95,12 @@ def run_benchmark(
         if mosa_res.exists():
             with fits.open(mosa_res) as hdul:
                 for h in hdul:
-                    if h.data is not None and getattr(h.data, "names", None) and "DETSIG" in h.data.names:
-                        source_count = len(h.data)
+                    # Same astropy HDUList/HDU stub imprecision as above.
+                    if h.data is not None and getattr(h.data, "names", None) and "DETSIG" in h.data.names:  # pyright: ignore[reportAttributeAccessIssue]
+                        source_count = len(h.data)  # pyright: ignore[reportAttributeAccessIssue]
                         if source_count > 0:
-                            top_source = str(h.data["NAME"][0]).strip()
-                            top_snr = float(h.data["DETSIG"][0])
+                            top_source = str(h.data["NAME"][0]).strip()  # pyright: ignore[reportAttributeAccessIssue]
+                            top_snr = float(h.data["DETSIG"][0])  # pyright: ignore[reportAttributeAccessIssue]
                         break
 
         results["full_reduction"] = {
