@@ -23,7 +23,7 @@ We have brought the **INTEGRAL Off-line Scientific Analysis (OSA 11)** pipeline 
    - All 214 Science Windows of Rev 0060 uncompressed and structured.
    - 115 Instrument Characteristics (IC) calibration indexes and mission reference trees (`aux/adp/ref/`: `tcoroffset`, `leap`, `de200`, `irot`) verified and active.
 4. **CLI & Visualization Suite**:
-   - `uv run integral analyze ibis` — Batch reduction and mosaicing.
+   - `uv run integral analyse ibis` — Batch reduction and mosaicing.
    - `uv run integral view image` — Automatic WCS celestial coordinate rendering with ZScale intensity stretching.
    - `uv run integral view sources` — Terminal summary tables of detected point sources and fluxes.
 
@@ -59,7 +59,7 @@ When resuming development:
 1. **Verify Baseline Science Pipeline**:
    ```bash
    # Run 10-ScW reduction benchmark
-   uv run integral analyze ibis rev:0060:10 --e-min 18 --e-max 60 --mosaic
+   uv run integral analyse ibis rev:0060:10 --e-min 18 --e-max 60 --mosaic
 
    # View generated mosaic and detected sources
    uv run integral view sources work/obs/obs_ibis/isgri_mosa_res.fits

@@ -51,16 +51,16 @@ uv run integral data download --catalogs
 ### 4. Run Scientific Reduction Pipelines
 ```bash
 # Run IBIS/ISGRI reduction & mosaic on 10 Science Windows (18-60 keV)
-uv run integral analyze ibis rev:0060:10 --e-min 18 --e-max 60 --mosaic
+uv run integral analyse ibis rev:0060:10 --e-min 18 --e-max 60 --mosaic
 
 # Run JEM-X reduction (Unit 1 or 2)
-uv run integral analyze jemx rev:0060:5 --unit 1
+uv run integral analyse jemx rev:0060:5 --unit 1
 
 # Run OMC optical reduction
-uv run integral analyze omc rev:0060:5
+uv run integral analyse omc rev:0060:5
 
 # Run SPI gamma-ray spectrometer reduction
-uv run integral analyze spi rev:0060:5
+uv run integral analyse spi rev:0060:5
 ```
 
 ---
