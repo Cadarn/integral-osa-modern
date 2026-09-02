@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # setup_local_env.sh
-# Initializes local directory structure for INTEGRAL OSA data & IC trees
+# Initialises local directory structure for INTEGRAL OSA data & IC trees
 # ==============================================================================
 
 set -euo pipefail
@@ -9,7 +9,7 @@ set -euo pipefail
 BASE_DATA_DIR="${1:-$HOME/integral_data}"
 
 echo "============================================================"
-echo "Initializing INTEGRAL local data workspace at: $BASE_DATA_DIR"
+echo "Initialising INTEGRAL local data workspace at: $BASE_DATA_DIR"
 echo "============================================================"
 
 mkdir -pv "$BASE_DATA_DIR/scw"

@@ -28,7 +28,7 @@ def build_image(
     tag: str = typer.Option("latest", "--tag", "-t", help="Tag for the built image"),
     no_cache: bool = typer.Option(False, "--no-cache", help="Build image without using cache"),
 ):
-    """Build the optimized INTEGRAL OSA Docker container image for local hardware."""
+    """Build the optimised INTEGRAL OSA Docker container image for local hardware."""
     project_root = Path(__file__).resolve().parent.parent.parent
     docker_dir = project_root / "docker"
 

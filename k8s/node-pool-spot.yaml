@@ -1,6 +1,6 @@
 # ==============================================================================
 # node-pool-spot.yaml
-# Scalable, Cost-Optimized Spot Node Pools for AWS (Karpenter/EKS) & GCP (GKE)
+# Scalable, Cost-Optimised Spot Node Pools for AWS (Karpenter/EKS) & GCP (GKE)
 # Enables 70-90% cost savings with scale-to-zero when idle.
 # ==============================================================================
 

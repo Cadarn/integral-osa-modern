@@ -4,7 +4,7 @@
 [![Docker Build & Publish](https://github.com/Cadarn/integral-osa-modern/actions/workflows/docker-build-publish.yml/badge.svg)](https://github.com/Cadarn/integral-osa-modern/actions/workflows/docker-build-publish.yml)
 [![Architecture](https://img.shields.io/badge/Arch-ARM64%20%7C%20AMD64-blue.svg)]()
 
-Modernized analysis pipeline, native **ARM64 / Apple Silicon** container runtime, and high-throughput Python CLI for ESA's **INTEGRAL (INTErnational Gamma-Ray Astrophysics Laboratory)** Off-line Scientific Analysis (OSA 11.2).
+Modernised analysis pipeline, native **ARM64 / Apple Silicon** container runtime, and high-throughput Python CLI for ESA's **INTEGRAL (INTErnational Gamma-Ray Astrophysics Laboratory)** Off-line Scientific Analysis (OSA 11.2).
 
 ---
 
@@ -13,14 +13,14 @@ Modernized analysis pipeline, native **ARM64 / Apple Silicon** container runtime
 * **Native ARM64 Compilation & 2.44× Speedup:** Eliminates Rosetta/QEMU emulation bottlenecks on Apple Silicon (M1/M2/M3/M4) and ARM64 cloud instances (AWS Graviton), achieving a **2.44× wall-clock speedup** with verified sub-0.07% numerical consistency.
 * **Complete Multi-Instrument Suite:** Verified native builds for **IBIS** (`ibis_science_analysis`), **JEM-X** (`jemx_science_analysis`), **OMC** (`omc_science_analysis`), and **SPI** (`spi_science_analysis`, `spiros`, `spimodfit`).
 * **Slim Modern Containers (1.02 GB):** ~64% smaller than legacy releases (2.8 GB), with CERN ROOT overhead removed and a modern Python 3.12 scientific stack (`astropy`, `numpy`, `scipy`, `matplotlib`) pre-installed via [`uv`](https://github.com/astral-sh/uv).
-* **Unified Typer CLI (`integral`):** Streamlined local and cloud reduction workflows, automated data archive initialization, HEASARC downloads, and FITS mosaic visualization.
+* **Unified Typer CLI (`integral`):** Streamlined local and cloud reduction workflows, automated data archive initialisation, HEASARC downloads, and FITS mosaic visualisation.
 * **Production CI/CD:** Automated multi-arch GitHub Actions building and tagging images on Docker Hub.
 
 ---
 
 ## 🚀 Quick Start (Using the `integral` CLI)
 
-### 1. Initialize Python Environment with `uv`
+### 1. Initialise Python Environment with `uv`
 ```bash
 # Clone the repository
 git clone https://github.com/Cadarn/integral-osa-modern.git
@@ -36,9 +36,9 @@ uv sync
 uv run integral status
 ```
 
-### 3. Initialize Data Archive & Import Local Data
+### 3. Initialise Data Archive & Import Local Data
 ```bash
-# Initialize local archive (default: ~/science/integral_data_archive)
+# Initialise local archive (default: ~/science/integral_data_archive)
 uv run integral data init
 
 # Import/link existing revolution data (e.g. Revolution 0060)

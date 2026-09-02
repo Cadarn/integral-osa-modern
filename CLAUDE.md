@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A modernization of ESA's INTEGRAL (INTErnational Gamma-Ray Astrophysics Laboratory) Off-line
+A modernisation of ESA's INTEGRAL (INTErnational Gamma-Ray Astrophysics Laboratory) Off-line
 Scientific Analysis (OSA 11.2) pipeline: a native ARM64/Apple Silicon container build of the
 ~20-year-old ISDC C/C++/Fortran science software, plus a unified Python/Typer CLI (`integral`)
 that wraps the legacy binaries for local reduction and cloud/Kubernetes batch processing.
