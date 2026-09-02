@@ -43,10 +43,15 @@ measured, and written up in `docs/technical_rebuild_arm64.md`.
      run yet either. Extending this into a proper multi-instrument, multi-repeat benchmark matrix
      is scoped in `docs/technical_roadmap.md` as groundwork for the planned MNRAS submission.
 3. **Data Archive & Calibration Standardisation**:
-   - High-throughput parallel downloader implemented in the Typer CLI (`integral data download`).
+   - High-throughput parallel downloader implemented in the Typer CLI (`integral data download`,
+     now a `revolution`/`scw`/`file`/`calibration` sub-app rather than a single flat command).
    - All 214 Science Windows of Rev 0060 uncompressed and structured.
    - 115 Instrument Characteristics (IC) calibration indexes and mission reference trees
-     (`aux/adp/ref/`: `tcoroffset`, `leap`, `de200`, `irot`) verified and active.
+     (`aux/adp/ref/`: `tcoroffset`, `leap`, `de200`, `irot`) verified and active **for the original
+     10-ScW benchmark dataset** (staged via `import-local` from a pre-obtained bundle). This does
+     **not** carry over to data fetched fresh via the newer HEASARC-based `data download` command —
+     see §3 item 6 below, which found that path currently produces an IC tree that fails calibration
+     resolution during a real reduction.
 4. **CLI & Visualisation Suite**:
    - `uv run integral analyse ibis` — batch reduction and mosaicing (also `jemx`, `omc`, `spi`).
    - `uv run integral view image` — automatic WCS celestial coordinate rendering with ZScale
@@ -95,10 +100,28 @@ Now that the native ARM64 build itself is done, the real open items are:
 5. **Superseded Dockerfile variants and pre-modernisation launcher scripts have been archived**
    under `docker/legacy/` and `scripts/legacy/` (see the README in each) rather than left mixed in
    with the actively-built/used files.
+6. **Data fetched via `integral data download` doesn't currently produce a working reduction.**
+   Verified end-to-end: downloaded 5 real ScWs from Rev 0060 plus catalogs, IC index, aux data, and
+   the full IBIS/SC/IREM IC calibration trees (~4.3GB), then ran a real `integral analyse ibis`
+   reduction against it. It fails during background estimation:
+   `Could not open IC Master Group ... status = -2004` / `IC problem for category ISGR-BACK-BKG`.
+   Traced this by hand as far as the data allows: the `IC_Alias="OSA"` alias, its
+   `ISGR_BACK_BKG=7` version selector, the matching index rows, and the referenced
+   `isgr_back_bkg_0007.fits` file are all present, valid, and correctly path-resolvable — yet the
+   real ARM64 binary still can't resolve the category. The install guide documents the
+   *authoritative* IC distribution as `rsync isdcarc.unige.ch::arc/FTP/arc_dist/ic_tree/prod/`
+   (confirmed unreachable — that ISDC service is down), so `data download` necessarily uses an
+   unofficial HEASARC mirror instead, which may not be equivalent to what OSA expects. Traced the
+   failure into the actual DAL source (`support-sw/isdcroot/icaccess.c`,
+   `ICsubIndexGetDOLs`) but the numeric meaning of status `-2004` isn't defined in any bundled
+   header, so pinning this down further needs ISDC's own DAL error-code reference or support —
+   noted in `README.md`'s Quick Start as a known limitation in the meantime.
 
 ## 4. How to Resume Work
 
-1. **Re-verify the baseline science pipeline still reproduces the headline numbers**:
+1. **Re-verify the baseline science pipeline still reproduces the headline numbers**, using data
+   staged via `import-local` from the original verified bundle (not the newer `data download`
+   command — see §3 item 6):
    ```bash
    # Run the 10-ScW IBIS reduction benchmark
    uv run integral analyse ibis rev:0060:10 --e-min 18 --e-max 60 --mosaic
@@ -107,8 +130,11 @@ Now that the native ARM64 build itself is done, the real open items are:
    uv run integral view sources work/obs/obs_ibis/isgri_mosa_res.fits
    uv run integral view image work/obs/obs_ibis/isgri_mosa_ima.fits
    ```
-2. **Build out the MNRAS benchmark matrix** described in `docs/technical_roadmap.md` §A: extend
+2. **Resolve the IC calibration resolution failure** (§3 item 6) before relying on
+   `data download`-sourced data for anything real — either by finding a working mirror of ISDC's
+   official `ic_tree/prod` bundle, or via ISDC/INTEGRAL help-desk support on DAL status `-2004`.
+3. **Build out the MNRAS benchmark matrix** described in `docs/technical_roadmap.md` §A: extend
    `integral_cli/benchmark.py` to cover JEM-X/OMC/SPI, multiple ScW counts, and repeats, and check
    in the resulting `benchmark_results.jsonl` as the paper's evidence trail.
-3. **Pick a direction on the cloud and GUI tracks** in `docs/technical_roadmap.md` §B/§C — both
+4. **Pick a direction on the cloud and GUI tracks** in `docs/technical_roadmap.md` §B/§C — both
    are written up as options for discussion, not yet started.
