@@ -1,5 +1,12 @@
 # Implementation Plan: INTEGRAL OSA Optimization (Native ARM64, Cloud Scale-Out & `uv` Python Management)
 
+> **Superseded.** This is the original design document and is kept for historical context only —
+> the directory layout, filenames, and entry points it describes (`osa-docker/`, `osa-run`,
+> `fetch-integral-data.py`, `integral-batch`) don't match what was actually built (`docker/`,
+> `osa_run`, `fetch_integral_data.py`, `integral-distribute`). For the current state of the
+> project, see `docs/status_report.md`; for the completed native ARM64 build this plan proposed,
+> see `docs/technical_rebuild_arm64.md`; for what comes next, see `docs/technical_roadmap.md`.
+
 ## Goal Description
 The INTEGRAL space observatory data analysis pipeline requires modernization for two primary scenarios:
 1. **Local Apple Silicon (ARM64 M-Series macOS)**: Native ARM64 execution without Rosetta emulation, utilizing native HEASoft + patched ROOT 5 / OSA pipelines and VirtioFS I/O acceleration.
