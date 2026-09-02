@@ -10,7 +10,8 @@
 #   5. Copy *.cxx into /opt/osa/include/ so ibis_science_analysis.C can #include "ISDCmain.cxx"
 #   6. Fortran: -fallow-argument-mismatch for legacy argument mismatches
 
-FROM --platform=linux/arm64 ubuntu:22.04 AS builder
+FROM ubuntu:22.04 AS builder
+
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
@@ -231,7 +232,8 @@ RUN test -x /opt/osa/bin/ibis_science_analysis && \
 # ════════════════════════════════════════════════════════════════════════════
 # Runtime stage: minimal Ubuntu 22.04 + uv + Python venv
 # ════════════════════════════════════════════════════════════════════════════
-FROM --platform=linux/arm64 ubuntu:22.04 AS runtime
+FROM ubuntu:22.04 AS runtime
+
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
