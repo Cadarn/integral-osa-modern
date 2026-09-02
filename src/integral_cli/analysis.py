@@ -12,6 +12,7 @@ from rich.panel import Panel
 
 from integral_cli.config import config
 from integral_cli.docker_mgr import run_container
+from integral_cli.scw_utils import filter_pointing_scws
 
 console = Console()
 analysis_app = typer.Typer(help="Run INTEGRAL scientific reduction pipelines and benchmarks")
@@ -29,10 +30,8 @@ def _resolve_scw_ids(scw_input: str) -> list[str]:
             console.print(f"[bold red]Error: Revolution {rev_id} directory {scw_dir} does not exist.[/bold red]")
             raise typer.Exit(code=1)
 
-        # Select pointing Science Windows (ending in 0010)
-        found_scws = sorted([d.name.split(".")[0] for d in scw_dir.iterdir() if d.is_dir() and d.name.startswith(rev_id) and d.name.split(".")[0].endswith("0010")])
-        if not found_scws:
-            found_scws = sorted([d.name.split(".")[0] for d in scw_dir.iterdir() if d.is_dir() and len(d.name) >= 12])
+        all_ids = sorted(d.name.split(".")[0] for d in scw_dir.iterdir() if d.is_dir() and len(d.name.split(".")[0]) == 12)
+        found_scws = filter_pointing_scws(all_ids, rev_id)
         return found_scws[:limit] if limit else found_scws
     elif Path(scw_input).exists():
         return [line.strip() for line in Path(scw_input).read_text().splitlines() if line.strip() and not line.startswith("#")]

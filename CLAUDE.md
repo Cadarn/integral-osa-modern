@@ -24,7 +24,10 @@ uv sync
 uv run integral <command>
 uv run integral status                 # architecture/config info
 uv run integral data init              # init local data archive
-uv run integral data download --catalogs
+uv run integral data download revolution 0060 --count 5    # first 5 pointing ScWs + catalogs/IC-index/aux
+uv run integral data download scw 006000010010,006000020010
+uv run integral data download file scw_list.txt
+uv run integral data download calibration --ic-trees --instruments ibis,sc  # large per-instrument IC trees, opt-in
 uv run integral analyse ibis rev:0060:10 --e-min 18 --e-max 60 --mosaic
 uv run integral analyse jemx rev:0060:5 --unit 1
 uv run integral analyse omc rev:0060:5
@@ -71,7 +74,17 @@ docker build --platform linux/amd64 -t integralsw/osa:11-modern-amd64 -f docker/
   instrument or pipeline stage, mirror this structure rather than introducing a different one.
 - `data_mgr.py` — async httpx/HTTP2 downloader for HEASARC's public INTEGRAL archive
   (`https://heasarc.gsfc.nasa.gov/FTP/integral/data`); handles local archive layout
-  (`scw/<rev>/`, `idx/ic/`, `aux/`), atomic `.tmp`-then-rename downloads, and local data import.
+  (`scw/<rev>/`, `idx/ic/`, `aux/adp/<rev>.001/`), atomic `.tmp`-then-rename downloads (with a
+  `force` override to re-download), and local data import. `integral data download` is a
+  sub-Typer (`revolution`/`scw`/`file`/`calibration`) — each resolves a target ScW set (remotely,
+  via `async_list_remote_scws`, unlike `analysis.py`'s local-directory resolution) and always
+  fetches catalogs + the IC index + per-revolution aux data unless `--science-only`; full
+  per-instrument IC calibration trees (`async_download_ic_tree`, can be multiple GB each) are
+  opt-in via `--ic-trees` since they're too large to fetch by default. `--dry-run` lists what
+  would be fetched without downloading; `--force-refresh` bypasses the exists-check.
+- `scw_utils.py` — `filter_pointing_scws()`, the pointing-ScW-selection convention (IDs ending
+  `0010`, falling back to all IDs) shared between `analysis.py`'s local resolution and
+  `data_mgr.py`'s remote resolution.
 - `viewer.py` — FITS mosaic/image viewing (WCS rendering, ZScale) and source-list summaries.
 - `benchmark.py` — cross-architecture (native ARM64 vs emulated x86_64) timing comparisons.
 
