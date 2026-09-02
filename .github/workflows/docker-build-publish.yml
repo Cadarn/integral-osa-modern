@@ -18,10 +18,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   build-and-publish:
-    name: Build & Publish Multi-Arch OSA Images
-    runs-on: ubuntu-24.04
+    name: Build & Publish Multi-Arch OSA Images (${{ matrix.name }})
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -30,6 +34,7 @@ jobs:
             dockerfile: docker/Dockerfile.native-arm64
             platforms: linux/arm64
             tag_suffix: 11-native-arm64
+
           - name: modern-x86
             dockerfile: docker/Dockerfile.modern
             platforms: linux/amd64
