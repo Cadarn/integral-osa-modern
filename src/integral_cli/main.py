@@ -5,12 +5,12 @@ Main entry point for the unified INTEGRAL OSA Typer CLI.
 import typer
 from rich.console import Console
 
-from integral_cli.config import config
-from integral_cli.docker_mgr import docker_app, docker_status
-from integral_cli.data_mgr import data_app
 from integral_cli.analysis import analysis_app
-from integral_cli.viewer import view_app
 from integral_cli.benchmark import benchmark_app
+from integral_cli.data_mgr import data_app
+from integral_cli.docker_mgr import docker_app, docker_status
+from integral_cli.tui import launch_tui
+from integral_cli.viewer import view_app
 from scripts.validate_science_products import compare as validate_cmd
 
 console = Console()
@@ -31,6 +31,7 @@ app.add_typer(benchmark_app, name="benchmark", help="Run performance benchmarks 
 # Top level convenience commands
 app.command("status")(docker_status)
 app.command("validate")(validate_cmd)
+app.command("tui", help="Launch the interactive terminal UI for configuring and running analyses")(launch_tui)
 
 
 @app.command("info")
