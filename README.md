@@ -36,7 +36,7 @@ uv sync
 uv run integral status
 ```
 
-### 3. Initialise Data Archive & Import Local Data
+### 3. Initialise Data Archive & Download Data
 ```bash
 # Initialise local archive (default: ~/science/integral_data_archive)
 uv run integral data init
@@ -44,9 +44,24 @@ uv run integral data init
 # Import/link existing revolution data (e.g. Revolution 0060)
 uv run integral data import-local /path/to/0060 --link
 
-# Download latest general reference catalogs from HEASARC
-uv run integral data download --catalogs
+# Download the first 5 pointing Science Windows of Revolution 0060, plus the
+# catalogs/IC-index/aux data every reduction needs (skipped automatically if
+# already present)
+uv run integral data download revolution 0060 --count 5
+
+# Or fetch specific ScWs, or a whole file of ScW IDs
+uv run integral data download scw 006000010010,006000020010
+uv run integral data download file scw_list.txt
+
+# Full per-instrument IC calibration trees are large (multi-GB) and opt-in
+uv run integral data download calibration --ic-trees --instruments ibis,sc
 ```
+> [!NOTE]
+> A reduction needs the full IC calibration tree (`--ic-trees`) for its instrument, not just
+> the default catalogs/IC-index/aux fetch above. Even with the full tree downloaded, IBIS
+> reductions currently fail during background estimation (`ISGR-BACK-BKG status -2004`) when
+> data is sourced from this HEASARC-based downloader rather than ISDC's own (currently offline)
+> IC distribution — see `docs/status_report.md` for the full investigation.
 
 ### 4. Run Scientific Reduction Pipelines
 ```bash
