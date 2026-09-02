@@ -1,7 +1,7 @@
 # `integral-osa-modern`
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Docker Build & Publish](https://github.com/OWNER/integral-osa-modern/actions/workflows/docker-build-publish.yml/badge.svg)](https://github.com/OWNER/integral-osa-modern/actions/workflows/docker-build-publish.yml)
+[![Docker Build & Publish](https://github.com/Cadarn/integral-osa-modern/actions/workflows/docker-build-publish.yml/badge.svg)](https://github.com/Cadarn/integral-osa-modern/actions/workflows/docker-build-publish.yml)
 [![Architecture](https://img.shields.io/badge/Arch-ARM64%20%7C%20AMD64-blue.svg)]()
 
 Modernized analysis pipeline, native **ARM64 / Apple Silicon** container runtime, and high-throughput Python CLI for ESA's **INTEGRAL (INTErnational Gamma-Ray Astrophysics Laboratory)** Off-line Scientific Analysis (OSA 11.2).
@@ -23,8 +23,9 @@ Modernized analysis pipeline, native **ARM64 / Apple Silicon** container runtime
 ### 1. Initialize Python Environment with `uv`
 ```bash
 # Clone the repository
-git clone https://github.com/OWNER/integral-osa-modern.git
+git clone https://github.com/Cadarn/integral-osa-modern.git
 cd integral-osa-modern
+
 
 # Sync virtualenv using uv
 uv sync
