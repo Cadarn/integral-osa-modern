@@ -4,9 +4,9 @@ fetch_integral_data.py
 Download Science Windows, Aux files, Catalogs, and IC from ESA ISLA and HEASARC archives.
 """
 
-from pathlib import Path
 import os
-import sys
+from pathlib import Path
+
 import requests
 import typer
 from rich.console import Console

@@ -2,10 +2,10 @@
 Docker manager for building, configuring, and launching INTEGRAL OSA container images.
 """
 
-from pathlib import Path
 import os
 import subprocess
-from typing import Optional, Set
+from pathlib import Path
+
 import typer
 from rich.console import Console
 from rich.panel import Panel
@@ -81,9 +81,9 @@ def build_image(
         raise typer.Exit(code=e.returncode)
 
 
-def find_symlink_targets(base_path: Path) -> Set[Path]:
+def find_symlink_targets(base_path: Path) -> set[Path]:
     """Find all unique external parent directories targeted by symlinks."""
-    targets: Set[Path] = set()
+    targets: set[Path] = set()
     if not base_path.exists():
         return targets
 
@@ -94,16 +94,16 @@ def find_symlink_targets(base_path: Path) -> Set[Path]:
                 if resolved.exists():
                     targets.add(resolved.parent)
                     targets.add(resolved.parents[1])
-            except Exception:
-                pass
+            except Exception as e:
+                console.print(f"[dim yellow]Warning: could not resolve symlink {p}: {e}[/dim yellow]")
     return targets
 
 
 @docker_app.command("run")
 def run_container(
-    command: Optional[str] = typer.Argument(None, help="Command to run inside the container"),
-    image: Optional[str] = typer.Option(None, "--image", "-i", help="Docker image override"),
-    workdir: Optional[Path] = typer.Option(None, "--workdir", "-w", help="Host directory to mount as /home/integral"),
+    command: str | None = typer.Argument(None, help="Command to run inside the container"),
+    image: str | None = typer.Option(None, "--image", "-i", help="Docker image override"),
+    workdir: Path | None = typer.Option(None, "--workdir", "-w", help="Host directory to mount as /home/integral"),
     gui: bool = typer.Option(False, "--gui", "-g", help="Enable X11 GUI forwarding"),
 ):
     """Launch the INTEGRAL OSA container with local data mounts and correct UID/GID."""
@@ -161,7 +161,7 @@ def run_container(
         # Interactive session
         docker_args.extend(["-it", chosen_image, "bash", "-c", "source /init.sh 2>/dev/null || true; exec bash"])
         console.print(f"[bold blue]Launching interactive OSA session ({chosen_image})...[/bold blue]")
-        subprocess.run(docker_args)
+        subprocess.run(docker_args, check=False)
     else:
         # Non-interactive command
         docker_args.extend([chosen_image, "bash", "-c", f"source /init.sh 2>/dev/null || true; {command}"])
