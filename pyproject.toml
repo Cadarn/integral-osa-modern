@@ -1,7 +1,7 @@
 [project]
 name = "integral-cloud-analysis"
 version = "0.1.0"
-description = "Modernized INTEGRAL OSA analysis pipeline optimized for Apple Silicon and Cloud K8s"
+description = "Modernised INTEGRAL OSA analysis pipeline optimised for Apple Silicon and Cloud K8s"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

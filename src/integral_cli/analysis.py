@@ -109,7 +109,7 @@ def run_ibis(
 
     cd /home/integral
 
-    echo "=== 1. Initializing Observation Group ({og_name}) ==="
+    echo "=== 1. Initialising Observation Group ({og_name}) ==="
     og_create idxSwg="scw.list" \
               instrument="IBIS" \
               ogid="{og_name}" \
@@ -225,7 +225,7 @@ def run_jemx(
 
     cd /home/integral
 
-    echo "=== 1. Initializing Observation Group ({og_name}) ==="
+    echo "=== 1. Initialising Observation Group ({og_name}) ==="
     og_create idxSwg="scw.list" \
               instrument="{inst_name}" \
               ogid="{og_name}" \
@@ -324,7 +324,7 @@ def run_omc(
 
     cd /home/integral
 
-    echo "=== 1. Initializing Observation Group ({og_name}) ==="
+    echo "=== 1. Initialising Observation Group ({og_name}) ==="
     og_create idxSwg="scw.list" \
               instrument="OMC" \
               ogid="{og_name}" \
@@ -413,7 +413,7 @@ def run_spi(
 
     cd /home/integral
 
-    echo "=== 1. Initializing Observation Group ({og_name}) ==="
+    echo "=== 1. Initialising Observation Group ({og_name}) ==="
     og_create idxSwg="scw.list" \
               instrument="SPI" \
               ogid="{og_name}" \

@@ -1,5 +1,5 @@
 """
-Image and source visualization helpers for INTEGRAL data products (FITS images, source lists).
+Image and source visualisation helpers for INTEGRAL data products (FITS images, source lists).
 """
 
 from pathlib import Path
@@ -9,7 +9,7 @@ from rich.console import Console
 from rich.table import Table
 
 console = Console()
-view_app = typer.Typer(help="Inspect and visualize INTEGRAL FITS products and source lists")
+view_app = typer.Typer(help="Inspect and visualise INTEGRAL FITS products and source lists")
 
 
 @view_app.command("image")
@@ -81,7 +81,7 @@ def view_image(
             console.print(f"[bold green]✓ Rendered {fits_path.name} [{target_hdu.name}] -> {out_file}[/bold green]")
 
     except Exception as e:
-        console.print(f"[bold red]Failed to visualize FITS image: {e}[/bold red]")
+        console.print(f"[bold red]Failed to visualise FITS image: {e}[/bold red]")
         raise typer.Exit(code=1)
 
 

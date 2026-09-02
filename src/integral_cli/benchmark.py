@@ -1,7 +1,7 @@
 """
 Benchmarking suite for comparing INTEGRAL OSA execution across:
 1. Base Legacy Container (integralsw/osa:11.0 via Rosetta 2)
-2. Layer 1 Modernization (Native ARM64 Python/Astropy/FITS stack)
+2. Layer 1 Modernisation (Native ARM64 Python/Astropy/FITS stack)
 3. End-to-End Scientific Reduction & Mosaicing
 """
 
@@ -35,7 +35,7 @@ def run_benchmark(
 
     console.print(
         Panel(
-            f"[bold magenta]Starting INTEGRAL 3-Tier Modernization Benchmark[/bold magenta]\n\n"
+            f"[bold magenta]Starting INTEGRAL 3-Tier Modernisation Benchmark[/bold magenta]\n\n"
             f"• Target Dataset:   [cyan]{scw_input}[/cyan]\n"
             f"• Energy Range:     [cyan]{e_min} - {e_max} keV[/cyan]\n"
             f"• Working Directory:[cyan]{workdir}[/cyan]\n"
@@ -121,7 +121,7 @@ def run_benchmark(
         console.print(f"\n[dim]Saved benchmark metrics to {output_json}[/dim]")
 
     # Print summary comparison table
-    table = Table(title="INTEGRAL Modernization Benchmark Summary", title_style="bold green")
+    table = Table(title="INTEGRAL Modernisation Benchmark Summary", title_style="bold green")
     table.add_column("Tier / Architecture", style="cyan")
     table.add_column("Execution Time (s)", justify="right", style="bold yellow")
     table.add_column("Performance Notes", style="magenta")

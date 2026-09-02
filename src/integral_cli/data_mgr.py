@@ -223,14 +223,14 @@ def init_repo(
         help="Target base directory for INTEGRAL data archive",
     )
 ):
-    """Initialize local data archive structure with standard subdirectories."""
+    """Initialise local data archive structure with standard subdirectories."""
     init_workspace(path)
     config.data_dir = str(path)
     config.ic_dir = str(path)
     config.save()
     console.print(
         Panel(
-            f"[bold green]Initialized INTEGRAL Data Archive at:[/bold green]\n{path.resolve()}",
+            f"[bold green]Initialised INTEGRAL Data Archive at:[/bold green]\n{path.resolve()}",
             title="Repository Setup",
         )
     )

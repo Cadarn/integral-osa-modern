@@ -300,7 +300,7 @@ Several structural factors make this problem particularly acute:
 
 1. **Static language standards assumption**: Much astrophysics software assumes C89, C++98, or FORTRAN 77 semantics that have been deprecated or removed from modern compiler defaults. The transition from GNU89 inline semantics (GCC ≤ 4 default) to C99 semantics (GCC ≥ 5 default) is a silent breaking change for code using legacy inline patterns.
 
-2. **Architecture lock-in & Undefined Stack Memory**: Scientific software that was never tested outside x86 often has latent assumptions about integer sizes, endianness, alignment, and implicit pointer initialization. On modern 64-bit ARM64 Linux, unallocated pointers evaluate to `.true.` in `associated()` checks unless zeroed, leading to spurious `deallocate()` aborts.
+2. **Architecture lock-in & Undefined Stack Memory**: Scientific software that was never tested outside x86 often has latent assumptions about integer sizes, endianness, alignment, and implicit pointer initialisation. On modern 64-bit ARM64 Linux, unallocated pointers evaluate to `.true.` in `associated()` checks unless zeroed, leading to spurious `deallocate()` aborts.
 
 3. **Build system fragility**: Autoconf scripts with decade-old `config.guess` files fail silently or with misleading diagnostics on new architectures, requiring manual intervention that is undocumented in any user-facing installation guide.
 
