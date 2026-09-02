@@ -37,8 +37,9 @@ RUN uv venv /opt/venv && \
 # Setup runtime directories
 RUN mkdir -pv /data/cat/hec /data/cat/omc /data/scw /data/aux /data/ic /data/idx /opt/osa /opt/heasoft /output /scratch
 
-COPY init.sh /init.sh
-COPY init.d /init.d
+COPY docker/init.sh /init.sh
+COPY docker/init.d /init.d
+
 
 ENV ISDC_REF_CAT=/data/cat/hec/gnrl_refr_cat_0043.fits
 ENV ISDC_OMC_CAT=/data/cat/omc/omc_refr_cat_0005.fits
