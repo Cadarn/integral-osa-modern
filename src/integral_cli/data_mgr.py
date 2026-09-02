@@ -24,16 +24,16 @@ data_app.add_typer(download_app, name="download")
 
 HEASARC_FTP_BASE = "https://heasarc.gsfc.nasa.gov/FTP/integral/data"
 
-ALL_INSTRUMENTS = ["ibis", "jmx1", "jmx2", "omc", "spi", "sc"]
+ALL_INSTRUMENTS = ["ibis", "jmx1", "jmx2", "omc", "spi", "sc", "irem"]
 INSTRUMENT_ALIASES = {"jemx": "jmx1", "jemx1": "jmx1", "jemx2": "jmx2"}
 
 
 def _resolve_instruments(instruments_opt: str) -> list[str]:
     """Parse the --instruments option into IC directory names (default: the configured
-    default_instrument + 'sc'; 'all' widens to every instrument)."""
+    default_instrument + the general 'sc'/'irem' categories; 'all' widens to every instrument)."""
     if not instruments_opt:
         default = config.default_instrument.lower()
-        return sorted({INSTRUMENT_ALIASES.get(default, default), "sc"})
+        return sorted({INSTRUMENT_ALIASES.get(default, default), "sc", "irem"})
     if instruments_opt.strip().lower() == "all":
         return ALL_INSTRUMENTS
     names = [n.strip().lower() for n in instruments_opt.split(",") if n.strip()]
@@ -405,6 +405,7 @@ def init_workspace(target_path: Path):
         "ic/omc",
         "ic/spi",
         "ic/sc",
+        "ic/irem",
         "idx/ic",
     ]:
         (target_path / d).mkdir(parents=True, exist_ok=True)
@@ -505,8 +506,8 @@ def import_local(
 _SCOPE_HELP = {
     "science_only": "Skip catalogs/IC/aux, fetch only Science Window data",
     "calib_only": "Skip Science Window data, only ensure catalogs/IC/aux are present",
-    "instruments": "Comma-separated IC instruments (ibis, jmx1, jmx2, omc, spi, sc, or 'all'); "
-    "default: the configured default_instrument + sc",
+    "instruments": "Comma-separated IC instruments (ibis, jmx1, jmx2, omc, spi, sc, irem, or 'all'); "
+    "default: the configured default_instrument + sc + irem",
     "cat_version": "Catalog version (e.g. 0043)",
     "concurrency": "Concurrent HTTP/2 download streams",
     "force_refresh": "Re-download even if files already exist locally",

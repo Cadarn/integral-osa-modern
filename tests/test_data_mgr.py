@@ -26,9 +26,9 @@ class _FakeResponse:
 # --- _resolve_instruments / _validate_scope_flags -----------------------------------------
 
 
-def test_resolve_instruments_defaults_to_configured_default_plus_sc(monkeypatch):
+def test_resolve_instruments_defaults_to_configured_default_plus_sc_and_irem(monkeypatch):
     monkeypatch.setattr(data_mgr.config, "default_instrument", "IBIS")
-    assert data_mgr._resolve_instruments("") == sorted({"ibis", "sc"})
+    assert data_mgr._resolve_instruments("") == sorted({"ibis", "sc", "irem"})
 
 
 def test_resolve_instruments_all_widens_to_every_instrument():
