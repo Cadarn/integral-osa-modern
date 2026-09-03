@@ -578,6 +578,7 @@ class IntegralTUI(App):
                         "0.01",
                     ]:
                         time_step_input.value = "4.0" if inst == "jemx" else "10.0"
+                    timing_box.scroll_visible()
                 else:
                     timing_box.add_class("hidden")
 
