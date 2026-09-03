@@ -35,7 +35,9 @@ app.add_typer(
 # Top level convenience commands
 app.command("status")(docker_status)
 app.command("validate")(validate_cmd)
-app.command("tui", help="Launch the interactive terminal UI for configuring and running analyses")(launch_tui)
+app.command("tui", help="Launch the interactive terminal UI for configuring and running analyses")(
+    launch_tui
+)
 
 
 @app.command("info")
