@@ -1,0 +1,16 @@
+{
+  "layer1_native_python": {
+    "name": "Layer 1: Native ARM64 Python/Astropy",
+    "time_sec": 0.01622658400447108,
+    "sources_indexed": 1227,
+    "status": "SUCCESS"
+  },
+  "full_reduction": {
+    "name": "Full IBIS/ISGRI Reduction (18-60 keV)",
+    "time_sec": 25.703422124992358,
+    "sources_detected": 6,
+    "top_source": "XTE J1550-564",
+    "top_snr": 96.72440338134766,
+    "status": "SUCCESS"
+  }
+}
