@@ -15,7 +15,7 @@ from typing import ClassVar
 
 from textual import work
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import (
     Button,
     Checkbox,
@@ -77,22 +77,25 @@ class IntegralTUI(App):
     """Enhanced form-based launcher for `integral analyse` with progress tracking, log viewing, and product inspection."""
 
     CSS = """
-    #form {
-        height: auto;
-        padding: 1 2;
-        border: round $accent;
+    Screen {
+        layout: vertical;
     }
-    #form Input, #form Select {
+    #main_layout {
+        height: 1fr;
+    }
+    #sidebar {
+        width: 46;
+        min-width: 40;
+        max-width: 52;
+        border-right: heavy $accent;
+        padding: 0 1;
+    }
+    #sidebar Input, #sidebar Select {
         margin-bottom: 1;
     }
-    .form-row {
-        height: auto;
-        margin-bottom: 1;
-    }
-    .form-col {
-        width: 1fr;
-        height: auto;
-        margin-right: 1;
+    .field-label {
+        margin-top: 1;
+        text-style: bold;
     }
     #progress_box {
         height: auto;
@@ -127,6 +130,21 @@ class IntegralTUI(App):
     #buttons {
         height: auto;
         margin-top: 1;
+        margin-bottom: 1;
+    }
+    #right_panel {
+        width: 1fr;
+        height: 100%;
+    }
+    TabbedContent {
+        height: 100%;
+    }
+    ContentSwitcher {
+        height: 1fr;
+    }
+    TabPane {
+        height: 100%;
+        padding: 0;
     }
     RichLog {
         border: round $primary;
@@ -145,75 +163,64 @@ class IntegralTUI(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Vertical(id="form"):
-            yield Static(f"Data archive: {config.rep_base_prod}  |  Image: {config.docker_image}")
-
-            with Horizontal(classes="form-row"):
-                with Vertical(classes="form-col"):
-                    yield Static("Instrument:", classes="label")
-                    yield Select(
-                        [(i.upper(), i) for i in INSTRUMENTS], value="ibis", id="instrument"
-                    )
-                with Vertical(classes="form-col"):
-                    yield Static("Science Windows:", classes="label")
-                    yield Input(
-                        placeholder="e.g. rev:0060:5, 006000010010, scw.list", id="scw_input"
-                    )
-
-            with Horizontal(classes="form-row"):
-                with Vertical(classes="form-col"):
-                    yield Static("Detector Mode (IBIS):", classes="label")
-                    yield Select(DETECTOR_MODES, value="isgri", id="detector_mode")
-                with Vertical(classes="form-col"):
-                    yield Static("Observation Group Name:", classes="label")
-                    yield Input(placeholder="obs_ibis", value="obs_ibis", id="og_name")
-
-            with Horizontal(classes="form-row"):
-                with Vertical(classes="form-col"):
-                    yield Static("Energy Band:", classes="label")
-                    yield Select(ENERGY_PRESETS, value="18-60", id="energy_preset")
-                with Vertical(classes="form-col"):
-                    yield Static("Custom Band (if selected):", classes="label")
-                    yield Input(placeholder="e.g. 20-40, 40-100", id="custom_bands", disabled=True)
-
-            with Horizontal(classes="form-row"):
-                with Vertical(classes="form-col"):
-                    yield Static("Pipeline Product / Level:", classes="label")
-                    yield Select(PRODUCT_LEVELS, value="IMA2", id="product_level")
-                with Vertical(classes="form-col"):
-                    yield Static("Working Directory:", classes="label")
-                    yield Input(placeholder="Working directory (default: ./work)", id="workdir")
-
-            with Collapsible(title="Advanced Settings", collapsed=True, id="advanced_settings"):
-                with Horizontal(classes="form-row"):
-                    with Vertical(classes="form-col"):
-                        yield Static("Deconvolution Cleaning Mode:", classes="label")
-                        yield Select(CLEAN_MODES, value="1", id="clean_mode")
-                    with Vertical(classes="form-col"):
-                        yield Static("Bright PIF Threshold:", classes="label")
-                        yield Input(placeholder="0.0001", value="0.0001", id="bright_threshold")
-                yield Checkbox(
-                    "Clean previous observation group directory before run",
-                    value=True,
-                    id="clean_toggle",
+        with Horizontal(id="main_layout"):
+            with VerticalScroll(id="sidebar"):
+                yield Static(
+                    f"Archive: {config.rep_base_prod}\nImage: {config.docker_image}",
+                    id="header_info",
                 )
 
-            with Vertical(id="progress_box"):
-                yield Static("Status: Ready to run", id="status_label")
-                yield ProgressBar(total=100, show_eta=False, id="progress_bar")
-                yield Static("", id="result_banner")
+                with Vertical(id="progress_box"):
+                    yield Static("Status: Ready to run", id="status_label")
+                    yield ProgressBar(total=100, show_eta=False, id="progress_bar")
+                    yield Static("", id="result_banner")
 
-            with Horizontal(id="buttons"):
-                yield Button("Run Analysis", id="run", variant="success")
-                yield Button("Quit", id="quit", variant="error")
+                with Horizontal(id="buttons"):
+                    yield Button("Run Analysis", id="run", variant="success")
+                    yield Button("Quit", id="quit", variant="error")
 
-        with TabbedContent(id="tabs"):
-            with TabPane("Pipeline Output", id="tab_logs"):
-                yield RichLog(id="log", wrap=True, highlight=True, markup=True)
-            with TabPane("Detected Sources", id="tab_sources"):
-                yield DataTable(id="sources_table")
-            with TabPane("Saved Log File", id="tab_saved_log"):
-                yield RichLog(id="saved_log_text", wrap=True, highlight=False, markup=False)
+                yield Static("Instrument:", classes="field-label")
+                yield Select([(i.upper(), i) for i in INSTRUMENTS], value="ibis", id="instrument")
+
+                yield Static("Science Windows:", classes="field-label")
+                yield Input(placeholder="e.g. rev:0060:5, 006000010010, scw.list", id="scw_input")
+
+                yield Static("Detector Mode (IBIS):", classes="field-label")
+                yield Select(DETECTOR_MODES, value="isgri", id="detector_mode")
+
+                yield Static("Observation Group Name:", classes="field-label")
+                yield Input(placeholder="obs_ibis", value="obs_ibis", id="og_name")
+
+                yield Static("Energy Band:", classes="field-label")
+                yield Select(ENERGY_PRESETS, value="18-60", id="energy_preset")
+
+                yield Static("Custom Band (if selected above):", classes="field-label")
+                yield Input(placeholder="e.g. 20-40, 40-100", id="custom_bands", disabled=True)
+
+                yield Static("Pipeline Product / Level:", classes="field-label")
+                yield Select(PRODUCT_LEVELS, value="IMA2", id="product_level")
+
+                yield Static("Working Directory:", classes="field-label")
+                yield Input(placeholder="Working directory (default: ./work)", id="workdir")
+
+                with Collapsible(title="Advanced Settings", collapsed=True, id="advanced_settings"):
+                    yield Static("Deconvolution Cleaning Mode:", classes="field-label")
+                    yield Select(CLEAN_MODES, value="1", id="clean_mode")
+                    yield Static("Bright PIF Threshold:", classes="field-label")
+                    yield Input(placeholder="0.0001", value="0.0001", id="bright_threshold")
+                    yield Checkbox(
+                        "Clean previous observation group directory before run",
+                        value=True,
+                        id="clean_toggle",
+                    )
+
+            with Vertical(id="right_panel"), TabbedContent(id="tabs"):
+                with TabPane("Pipeline Output", id="tab_logs"):
+                    yield RichLog(id="log", wrap=True, highlight=True, markup=True)
+                with TabPane("Detected Sources", id="tab_sources"):
+                    yield DataTable(id="sources_table")
+                with TabPane("Saved Log File", id="tab_saved_log"):
+                    yield RichLog(id="saved_log_text", wrap=True, highlight=False, markup=False)
 
         yield Footer()
 
@@ -438,28 +445,28 @@ class IntegralTUI(App):
             self.call_from_thread(
                 self._log, "[bold green]✓ Run completed successfully.[/bold green]"
             )
-            # Count detected sources
-            source_count = self._populate_sources(actual_workdir, og_name)
-            self.call_from_thread(self._load_saved_log, actual_workdir, og_name)
-            self.call_from_thread(
-                self._show_result_banner,
-                True,
-                f"Run finished successfully! Found {source_count} point source(s). Results in obs/{og_name}",
-            )
-            if source_count > 0:
 
-                def switch_to_sources():
+            def update_results():
+                source_count = self._populate_sources(actual_workdir, og_name)
+                self._load_saved_log(actual_workdir, og_name)
+                self._show_result_banner(
+                    True,
+                    f"Run finished successfully! Found {source_count} point source(s). Results in obs/{og_name}",
+                )
+                if source_count > 0:
                     self.query_one("#tabs", TabbedContent).active = "tab_sources"
 
-                self.call_from_thread(switch_to_sources)
+            self.call_from_thread(update_results)
         else:
             self.call_from_thread(
                 self._log, f"[bold red]✗ Run failed (exit code {returncode}).[/bold red]"
             )
-            self.call_from_thread(self._load_saved_log, actual_workdir, og_name)
-            self.call_from_thread(
-                self._show_result_banner, False, f"Run failed with exit code {returncode}."
-            )
+
+            def update_failure():
+                self._load_saved_log(actual_workdir, og_name)
+                self._show_result_banner(False, f"Run failed with exit code {returncode}.")
+
+            self.call_from_thread(update_failure)
 
 
 def launch_tui() -> None:
