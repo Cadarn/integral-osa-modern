@@ -92,9 +92,10 @@ def view_image(
             plt.savefig(out_file, bbox_inches="tight")
             plt.close(fig)
 
+            target_name = getattr(target_hdu, "name", "IMAGE")
             console.print(
-                f"[bold green]✓ Rendered {fits_path.name} [{target_hdu.name}] -> {out_file}[/bold green]"
-            )  # pyright: ignore[reportAttributeAccessIssue]
+                f"[bold green]✓ Rendered {fits_path.name} [{target_name}] -> {out_file}[/bold green]"
+            )
 
     except Exception as e:
         console.print(f"[bold red]Failed to visualise FITS image: {e}[/bold red]")
@@ -123,10 +124,10 @@ def view_sources(
             for h in hdul:
                 # Same astropy HDUList/HDU stub imprecision as in view_image() above.
                 if (
-                    h.data is not None
-                    and getattr(h.data, "names", None)
-                    and any(n in h.data.names for n in ["NAME", "SOURCE_ID", "DETSIG", "SNR"])
-                ):  # pyright: ignore[reportAttributeAccessIssue]
+                    h.data is not None  # pyright: ignore[reportAttributeAccessIssue]
+                    and getattr(h.data, "names", None)  # pyright: ignore[reportAttributeAccessIssue]
+                    and any(n in h.data.names for n in ["NAME", "SOURCE_ID", "DETSIG", "SNR"])  # pyright: ignore[reportAttributeAccessIssue]
+                ):
                     src_table = h
                     break
 
@@ -171,9 +172,10 @@ def view_sources(
                     table.add_row(name, ra, dec, f"{snr:.1f}", flux_str)
 
             console.print(table)
+            table_name = getattr(src_table, "name", "SOURCES")
             console.print(
-                f"[dim]Total: {count} sources detected with SNR ≥ {min_snr}σ (Table: {src_table.name})[/dim]"
-            )  # pyright: ignore[reportAttributeAccessIssue]
+                f"[dim]Total: {count} sources detected with SNR ≥ {min_snr}σ (Table: {table_name})[/dim]"
+            )
 
     except Exception as e:
         console.print(f"[bold red]Failed to view sources: {e}[/bold red]")

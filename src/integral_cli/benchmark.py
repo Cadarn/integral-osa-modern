@@ -113,12 +113,11 @@ def run_benchmark(
         if mosa_res.exists():
             with fits.open(mosa_res) as hdul:
                 for h in hdul:
-                    # Same astropy HDUList/HDU stub imprecision as above.
                     if (
-                        h.data is not None
-                        and getattr(h.data, "names", None)
-                        and "DETSIG" in h.data.names
-                    ):  # pyright: ignore[reportAttributeAccessIssue]
+                        h.data is not None  # pyright: ignore[reportAttributeAccessIssue]
+                        and getattr(h.data, "names", None)  # pyright: ignore[reportAttributeAccessIssue]
+                        and "DETSIG" in h.data.names  # pyright: ignore[reportAttributeAccessIssue]
+                    ):
                         source_count = len(h.data)  # pyright: ignore[reportAttributeAccessIssue]
                         if source_count > 0:
                             top_source = str(h.data["NAME"][0]).strip()  # pyright: ignore[reportAttributeAccessIssue]

@@ -307,9 +307,9 @@ def clean_ic_master_file(dest_base: Path):
         from astropy.io import fits
 
         with fits.open(master_path, mode="update") as master:
-            if len(master) < 3 or "GROUPING" not in master[2].header.get("EXTNAME", ""):
+            if len(master) < 3 or "GROUPING" not in master[2].header.get("EXTNAME", ""):  # pyright: ignore[reportAttributeAccessIssue]
                 return
-            data = master[2].data
+            data = master[2].data  # pyright: ignore[reportAttributeAccessIssue]
             keep_indices = []
             for idx, row in enumerate(data):
                 sub_idx_name = row["MEMBER_LOCATION"]
@@ -318,7 +318,7 @@ def clean_ic_master_file(dest_base: Path):
                     continue
                 all_exist = True
                 with fits.open(sub_idx_path) as sub:
-                    for sub_row in sub[1].data:
+                    for sub_row in sub[1].data:  # pyright: ignore[reportAttributeAccessIssue]
                         mem_loc = sub_row["MEMBER_LOCATION"]
                         target = (idx_dir / mem_loc).resolve()
                         if not target.exists():
@@ -328,9 +328,13 @@ def clean_ic_master_file(dest_base: Path):
                     keep_indices.append(idx)
 
             if len(keep_indices) != len(data):
-                new_table = fits.BinTableHDU(data=data[keep_indices], header=master[2].header)
+                new_table = fits.BinTableHDU(
+                    data=data[keep_indices],
+                    header=master[2].header,  # pyright: ignore[reportAttributeAccessIssue]
+                )
                 master[2] = new_table
                 master.flush()
+
     except Exception as e:
         console.print(
             f"[dim yellow]Notice: ic_master_file pruning check skipped ({e})[/dim yellow]"
