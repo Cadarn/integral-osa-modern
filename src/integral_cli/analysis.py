@@ -375,6 +375,28 @@ def run_ibis(
     else:
         end_level = "IMA2" if mosaic else "IMA"
 
+    # If LCR is chosen in interactive mode and time_step wasn't explicitly given
+    if is_interactive and end_level == "LCR":
+        console.print("\n[bold cyan]─── Lightcurve Timing Configuration ───[/bold cyan]")
+        console.print("  [cyan]1[/cyan]: Standard Lightcurve (10.0s bins)")
+        console.print("  [cyan]2[/cyan]: High-Resolution / Pulsar Timing (PIF mode, sub-second)")
+        console.print("  [cyan]3[/cyan]: Custom Time Bin")
+        t_choice = Prompt.ask("Select timing mode", default="1", choices=["1", "2", "3"])
+        if t_choice == "1":
+            timing_mode = "standard"
+            time_step = 10.0
+        elif t_choice == "2":
+            timing_mode = "pif"
+            t_input = Prompt.ask(
+                "Enter high-res time bin in seconds (e.g. 0.005 for 5ms)", default="0.005"
+            )
+            time_step = float(t_input)
+        else:
+            t_input = Prompt.ask("Enter time bin in seconds", default="10.0")
+            time_step = float(t_input)
+            if time_step < 0.05:
+                timing_mode = "pif"
+
     workdir.mkdir(parents=True, exist_ok=True)
     scw_file = workdir / "scw.list"
     obs_dir = workdir / "obs" / og_name
@@ -410,12 +432,18 @@ def run_ibis(
         detectors.append("Compton")
     det_desc = ", ".join(detectors) if detectors else "None"
 
+    timing_info = (
+        f"\n• Timing (LCR):    [cyan]{time_step}s bin size ({timing_mode.upper()} mode)[/cyan]"
+        if end_level == "LCR"
+        else ""
+    )
+
     setup_panel = Panel(
         f"[bold green]IBIS Science Reduction Setup[/bold green]\n\n"
         f"• ScW Count:       [cyan]{len(scws)} Science Windows[/cyan] ({scws[0]} ... {scws[-1]})\n"
         f"• Detectors:       [cyan]{det_desc}[/cyan]\n"
         f"• Energy Bands:    [cyan]{band_desc}[/cyan]\n"
-        f"• Analysis Level:  [cyan]startLevel={start_level} -> endLevel={end_level}[/cyan]\n"
+        f"• Analysis Level:  [cyan]startLevel={start_level} -> endLevel={end_level}[/cyan]{timing_info}\n"
         f"• Mosaicing (IMA2):[cyan]{'Enabled' if end_level == 'IMA2' else 'Single Pointing (IMA)'}[/cyan]\n"
         f"• Output Directory:[cyan]{obs_dir}[/cyan]\n"
         f"• Workdir:         [cyan]{workdir}[/cyan]\n"
