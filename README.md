@@ -13,8 +13,9 @@ Modernised analysis pipeline, native **ARM64 / Apple Silicon** container runtime
 * **Native ARM64 Compilation & 2.44× Speedup:** Eliminates Rosetta/QEMU emulation bottlenecks on Apple Silicon (M1/M2/M3/M4) and ARM64 cloud instances (AWS Graviton), achieving a **2.44× wall-clock speedup** with verified sub-0.07% numerical consistency.
 * **Complete Multi-Instrument Suite:** Verified native builds for **IBIS** (`ibis_science_analysis`), **JEM-X** (`jemx_science_analysis`), **OMC** (`omc_science_analysis`), and **SPI** (`spi_science_analysis`, `spiros`, `spimodfit`).
 * **Slim Modern Containers (1.02 GB):** ~64% smaller than legacy releases (2.8 GB), with CERN ROOT overhead removed and a modern Python 3.12 scientific stack (`astropy`, `numpy`, `scipy`, `matplotlib`) pre-installed via [`uv`](https://github.com/astral-sh/uv).
-* **Unified Typer CLI (`integral`):** Streamlined local and cloud reduction workflows, automated data archive initialisation, HEASARC downloads, and FITS mosaic visualisation.
-* **Production CI/CD:** Automated multi-arch GitHub Actions building and tagging images on Docker Hub.
+* **Interactive Terminal User Interface (TUI):** Full-featured [Textual](https://textual.textualize.io/) dashboard (`integral tui`) with dynamic instrument-aware parameter controls, local archive ScW browser, real-time stage progress & telemetry, collapsible sidebars, and interactive source inspection.
+* **Unified Typer CLI (`integral`):** Streamlined local and cloud reduction workflows, interactive wizards (`--interactive`), automated data archive initialisation, HEASARC downloads, and FITS mosaic visualisation.
+* **Production CI/CD:** GitHub Actions Python testing gate, automated multi-arch Docker image recipes, and Kubernetes distributed processing manifests.
 
 ---
 
@@ -26,17 +27,34 @@ Modernised analysis pipeline, native **ARM64 / Apple Silicon** container runtime
 git clone https://github.com/Cadarn/integral-osa-modern.git
 cd integral-osa-modern
 
-
 # Sync virtualenv using uv
 uv sync
 ```
 
-### 2. Inspect Environment & Archive Status
+### 2. Launch the Interactive Textual TUI Dashboard
+Launch the visual terminal dashboard to configure and run reductions without memorising CLI flags:
+```bash
+uv run integral tui
+```
+
+#### TUI Features & Shortcuts:
+* **Dynamic Instrument Forms:** Switch between **IBIS (Imager)**, **SPI (Spectrometer)**, **JEM-X (X-ray monitor)**, and **OMC (Optical)** — energy presets, detector modes, units, filters, and pipeline product levels update reactively.
+* **Timing / Lightcurve Controls:** Selecting `LCR` product levels displays timing analysis controls supporting both Standard (`ibis_lc`, default: 10s bins) and High-Resolution PIF modes (`ii_pif`, millisecond pulsar timing).
+* **Local ScW Archive Discovery:** Click `[Browse...]` next to Science Windows to visually discover and multi-select available pointings directly from your local archive.
+* **Collapsible Configuration Sidebar:** When analysis begins, the left-hand form auto-collapses to give 100% full-screen terminal width to live output logs, telemetry sparklines, and tables. Click `[⮜ Hide Config]` / `[⮞ Show Config]` or press <kbd>c</kbd> anytime to toggle.
+* **Interactive Source Inspection & Lightcurves:** Select rows from the **Detected Sources** table to inspect detailed coordinates, detection significance, and flux statistics.
+* **Keyboard Shortcuts:**
+  * <kbd>c</kbd>: Toggle configuration sidebar (Show / Hide).
+  * <kbd>q</kbd>: Quit dashboard.
+
+---
+
+### 3. Inspect Environment & Archive Status
 ```bash
 uv run integral status
 ```
 
-### 3. Initialise Data Archive & Download Data
+### 4. Initialise Data Archive & Download Data
 ```bash
 # Initialise local archive (default: ~/science/integral_data_archive)
 uv run integral data init
@@ -63,13 +81,19 @@ uv run integral data download calibration --ic-trees --instruments ibis,sc
 > data is sourced from this HEASARC-based downloader rather than ISDC's own (currently offline)
 > IC distribution — see `docs/status_report.md` for the full investigation.
 
-### 4. Run Scientific Reduction Pipelines
+### 5. Run Scientific Reduction Pipelines via CLI
 ```bash
-# Run IBIS/ISGRI reduction & mosaic on 10 Science Windows (18-60 keV)
+# Interactive reduction wizard (prompts for ScWs, energy bands, product levels)
+uv run integral analyse ibis --interactive
+
+# Direct CLI flags: Run IBIS/ISGRI reduction & mosaic on 10 Science Windows (18-60 keV)
 uv run integral analyse ibis rev:0060:10 --e-min 18 --e-max 60 --mosaic
 
-# Run JEM-X reduction (Unit 1 or 2)
-uv run integral analyse jemx rev:0060:5 --unit 1
+# High-resolution PIF lightcurve timing run (0.005s bins)
+uv run integral analyse ibis rev:0060:5 --end-level LCR --timing-mode pif --time-step 0.005
+
+# Run JEM-X reduction (Unit 1 or 2, 3-35 keV)
+uv run integral analyse jemx rev:0060:5 --unit 1 --bands 3-35
 
 # Run OMC optical reduction
 uv run integral analyse omc rev:0060:5
@@ -145,17 +169,38 @@ docker build --platform linux/amd64 \
 │   ├── Dockerfile.native-arm64 # Complete native ARM64 multi-instrument build
 │   ├── Dockerfile.modern       # Slim modern x86_64 multi-stage build
 │   ├── Dockerfile.batch        # Lightweight worker pod image for Kubernetes
-│   └── init.d/                 # Container runtime entrypoints (OSA, uv, HEASoft)
-├── src/integral_cli/           # Unified Typer CLI Application
-│   ├── main.py                 # CLI entry point
-│   ├── analysis.py             # Pipeline runners (IBIS, JEM-X, OMC, SPI)
-│   ├── benchmark.py            # Automated cross-architecture benchmark suite
+│   ├── init.sh                 # Container entrypoint environment loader
+│   └── init.d/                 # Runtime initialization scripts (OSA, uv, HEASoft)
+├── src/integral_cli/           # Unified CLI & Terminal User Interface
+│   ├── main.py                 # CLI entry point (`integral`)
+│   ├── tui.py                  # Full-featured Textual TUI dashboard (`integral tui`)
+│   ├── analysis.py             # Pipeline runners & wizards (IBIS, JEM-X, OMC, SPI)
+│   ├── config.py               # Centralised paths, Docker image & environment settings
 │   ├── data_mgr.py             # Data archive manager & HEASARC downloader
-│   ├── docker_mgr.py           # Docker build, run, and architecture detector
-│   └── viewer.py               # FITS mosaic image viewer & statistics
+│   ├── docker_mgr.py           # Docker execution engine & architecture detector
+│   ├── scw_utils.py            # Science window parsing & pointing filter utilities
+│   ├── viewer.py               # FITS mosaic image viewer & statistics
+│   └── benchmark.py            # Cross-architecture benchmark suite
+├── pipeline/                   # Distributed execution components
+│   ├── scw_distributor.py      # Multi-worker Science Window job distributor
+│   └── runner_scw.sh           # Per-ScW container execution wrapper script
+├── scripts/                    # Validation & diagnostic tools
+│   ├── fetch_integral_data.py  # Standalone archive fetcher
+│   └── validate_science_products.py # Numerical verification against ISDC reference runs
+├── tests/                      # Automated pytest suite (CLI, TUI, data, analysis)
+│   ├── test_analysis.py        # Pipeline invocation & energy band parsing tests
+│   ├── test_cli.py             # Typer CLI smoke & help tests
+│   ├── test_config.py          # Configuration loading & override tests
+│   ├── test_data_mgr.py        # Data archive & download tests
+│   ├── test_scw_utils.py       # ScW spec & pointing filter tests
+│   └── test_tui.py             # Textual async pilot tests (forms, timing, collapse)
 ├── docs/                       # Technical publications & documentation
-│   └── technical_rebuild_arm64.md # MNRAS Techniques paper draft
+│   ├── technical_rebuild_arm64.md # MNRAS Techniques paper draft
+│   ├── status_report.md        # Calibration & background estimation status
+│   └── technical_roadmap.md    # Multi-phase development roadmap
 ├── k8s/                        # Kubernetes spot-instance distributed cluster manifests
+│   ├── job-template.yaml       # Distributed worker pod batch job definition
+│   └── node-pool-spot.yaml     # Spot instance node pool specifications
 ├── pyproject.toml              # Dependencies & CLI build configuration (uv)
 └── LICENSE                     # MIT License
 ```
