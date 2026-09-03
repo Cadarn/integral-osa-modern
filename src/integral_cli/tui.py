@@ -301,14 +301,22 @@ class IntegralTUI(App):
         height: 1fr;
     }
     #sidebar {
-        width: 46;
-        min-width: 40;
-        max-width: 52;
+        width: 82;
+        min-width: 74;
+        max-width: 90;
         border-right: heavy $accent;
         padding: 0 1;
     }
+    #form_columns {
+        height: auto;
+    }
+    .form-column {
+        width: 1fr;
+        height: auto;
+        padding: 0 1;
+    }
     #sidebar Input, #sidebar Select {
-        margin-bottom: 1;
+        margin-bottom: 0;
     }
     .field-label {
         margin-top: 1;
@@ -317,10 +325,13 @@ class IntegralTUI(App):
     .hidden {
         display: none;
     }
-    .scw-input-row {
-
+    #custom_bands_box, #detector_mode_box, #jemx_unit_box, #energy_box, #timing_settings_box {
         height: auto;
-        margin-bottom: 1;
+    }
+    .scw-input-row {
+        height: auto;
+        margin-top: 0;
+        margin-bottom: 0;
     }
     #scw_input {
         width: 1fr;
@@ -332,20 +343,21 @@ class IntegralTUI(App):
         margin-left: 1;
     }
     #progress_box {
-
         height: auto;
-        margin-top: 1;
         margin-bottom: 1;
         padding: 1;
         border: round $secondary;
         background: $surface;
     }
+    #progress_row {
+        height: auto;
+    }
     #status_label {
-        margin-bottom: 1;
+        width: 1fr;
         text-style: bold;
     }
     #elapsed_time {
-        margin-top: 1;
+        width: auto;
         color: $accent;
         text-style: bold;
     }
@@ -387,9 +399,10 @@ class IntegralTUI(App):
     #right_panel {
         width: 1fr;
         height: 100%;
+        padding: 0 1;
     }
     TabbedContent {
-        height: 100%;
+        height: 1fr;
     }
     ContentSwitcher {
         height: 1fr;
@@ -422,86 +435,107 @@ class IntegralTUI(App):
                     id="header_info",
                 )
 
+                with Horizontal(id="buttons"):
+                    yield Button("Run Analysis", id="run", variant="success")
+                    yield Button("Quit", id="quit", variant="error")
+
+                with Horizontal(id="form_columns"):
+                    with Vertical(classes="form-column"):
+                        yield Static("Instrument:", classes="field-label")
+                        yield Select(INSTRUMENTS, value="ibis", id="instrument")
+
+                        yield Static("Science Windows:", classes="field-label")
+                        with Horizontal(classes="scw-input-row"):
+                            yield Input(
+                                placeholder="e.g. rev:0060:5, 006000010010, scw.list",
+                                id="scw_input",
+                            )
+                            yield Button("Browse", id="btn_browse_scw", variant="default")
+
+                        with Vertical(id="detector_mode_box"):
+                            yield Static("Detector Mode (IBIS):", classes="field-label")
+                            yield Select(DETECTOR_MODES, value="isgri", id="detector_mode")
+
+                        with Vertical(id="jemx_unit_box", classes="hidden"):
+                            yield Static("JEM-X Sensor Unit:", classes="field-label")
+                            yield Select(JEMX_UNITS, value="1", id="jemx_unit")
+
+                        yield Static("Observation Group Name:", classes="field-label")
+                        yield Input(placeholder="obs_ibis", value="obs_ibis", id="og_name")
+
+                        yield Static("Working Directory:", classes="field-label")
+                        yield Input(placeholder="Working directory (default: ./work)", id="workdir")
+
+                    with Vertical(classes="form-column"):
+                        with Vertical(id="energy_box"):
+                            yield Static(
+                                "Energy Band / Filter:", id="energy_label", classes="field-label"
+                            )
+                            yield Select(
+                                INSTRUMENT_ENERGY_PRESETS["ibis"], value="18-60", id="energy_preset"
+                            )
+
+                            with Vertical(id="custom_bands_box", classes="hidden"):
+                                yield Static(
+                                    "Custom Band (if selected above):",
+                                    id="custom_bands_label",
+                                    classes="field-label",
+                                )
+                                yield Input(
+                                    placeholder="e.g. 20-40, 40-100",
+                                    id="custom_bands",
+                                    disabled=True,
+                                )
+
+                        yield Static("Pipeline Product / Level:", classes="field-label")
+                        yield Select(
+                            INSTRUMENT_PRODUCT_LEVELS["ibis"], value="IMA2", id="product_level"
+                        )
+
+                        with Vertical(id="timing_settings_box", classes="hidden"):
+                            yield Static("Timing Analysis Mode:", classes="field-label")
+                            yield Select(TIMING_MODES, value="standard", id="timing_mode")
+                            yield Static(
+                                "Time Bin / Step (seconds):",
+                                id="time_step_label",
+                                classes="field-label",
+                            )
+                            yield Input(placeholder="e.g. 10.0", value="10.0", id="time_step")
+
+                        with Collapsible(
+                            title="Advanced Settings", collapsed=True, id="advanced_settings"
+                        ):
+                            with Vertical(id="ibis_cleaning_box"):
+                                yield Static("Deconvolution Cleaning Mode:", classes="field-label")
+                                yield Select(CLEAN_MODES, value="1", id="clean_mode")
+                                yield Static("Bright PIF Threshold:", classes="field-label")
+                                yield Input(
+                                    placeholder="0.0001", value="0.0001", id="bright_threshold"
+                                )
+                            yield Checkbox(
+                                "Clean previous observation group directory before run",
+                                value=True,
+                                id="clean_toggle",
+                            )
+
+            with Vertical(id="right_panel"):
                 with Vertical(id="progress_box"):
-                    yield Static("Status: Ready to run", id="status_label")
+                    with Horizontal(id="progress_row"):
+                        yield Static("Status: Ready to run", id="status_label")
+                        yield Static("Elapsed Time: --:--", id="elapsed_time")
                     yield ProgressBar(total=100, show_eta=False, id="progress_bar")
-                    yield Static("Elapsed Time: --:--", id="elapsed_time")
                     with Vertical(id="spark_box"):
                         yield Static("Activity Telemetry:", classes="metrics-sublabel")
                         yield Sparkline(data=[0, 0, 0, 0, 0], id="spark_activity")
                     yield Static("", id="result_banner")
 
-                with Horizontal(id="buttons"):
-                    yield Button("Run Analysis", id="run", variant="success")
-                    yield Button("Quit", id="quit", variant="error")
-
-                yield Static("Instrument:", classes="field-label")
-                yield Select(INSTRUMENTS, value="ibis", id="instrument")
-
-                yield Static("Science Windows:", classes="field-label")
-                with Horizontal(classes="scw-input-row"):
-                    yield Input(
-                        placeholder="e.g. rev:0060:5, 006000010010, scw.list", id="scw_input"
-                    )
-                    yield Button("Browse", id="btn_browse_scw", variant="default")
-
-                with Vertical(id="detector_mode_box"):
-                    yield Static("Detector Mode (IBIS):", classes="field-label")
-                    yield Select(DETECTOR_MODES, value="isgri", id="detector_mode")
-
-                with Vertical(id="jemx_unit_box", classes="hidden"):
-                    yield Static("JEM-X Sensor Unit:", classes="field-label")
-                    yield Select(JEMX_UNITS, value="1", id="jemx_unit")
-
-                yield Static("Observation Group Name:", classes="field-label")
-                yield Input(placeholder="obs_ibis", value="obs_ibis", id="og_name")
-
-                with Vertical(id="energy_box"):
-                    yield Static("Energy Band / Filter:", id="energy_label", classes="field-label")
-                    yield Select(
-                        INSTRUMENT_ENERGY_PRESETS["ibis"], value="18-60", id="energy_preset"
-                    )
-
-                    yield Static(
-                        "Custom Band (if selected above):",
-                        id="custom_bands_label",
-                        classes="field-label",
-                    )
-                    yield Input(placeholder="e.g. 20-40, 40-100", id="custom_bands", disabled=True)
-
-                yield Static("Pipeline Product / Level:", classes="field-label")
-                yield Select(INSTRUMENT_PRODUCT_LEVELS["ibis"], value="IMA2", id="product_level")
-
-                with Vertical(id="timing_settings_box", classes="hidden"):
-                    yield Static("Timing Analysis Mode:", classes="field-label")
-                    yield Select(TIMING_MODES, value="standard", id="timing_mode")
-                    yield Static(
-                        "Time Bin / Step (seconds):", id="time_step_label", classes="field-label"
-                    )
-                    yield Input(placeholder="e.g. 10.0", value="10.0", id="time_step")
-
-                yield Static("Working Directory:", classes="field-label")
-                yield Input(placeholder="Working directory (default: ./work)", id="workdir")
-
-                with Collapsible(title="Advanced Settings", collapsed=True, id="advanced_settings"):
-                    with Vertical(id="ibis_cleaning_box"):
-                        yield Static("Deconvolution Cleaning Mode:", classes="field-label")
-                        yield Select(CLEAN_MODES, value="1", id="clean_mode")
-                        yield Static("Bright PIF Threshold:", classes="field-label")
-                        yield Input(placeholder="0.0001", value="0.0001", id="bright_threshold")
-                    yield Checkbox(
-                        "Clean previous observation group directory before run",
-                        value=True,
-                        id="clean_toggle",
-                    )
-
-            with Vertical(id="right_panel"), TabbedContent(id="tabs"):
-                with TabPane("Pipeline Output", id="tab_logs"):
-                    yield RichLog(id="log", wrap=True, highlight=True, markup=True)
-                with TabPane("Detected Sources", id="tab_sources"):
-                    yield DataTable(id="sources_table", cursor_type="row", zebra_stripes=True)
-                with TabPane("Saved Log File", id="tab_saved_log"):
-                    yield RichLog(id="saved_log_text", wrap=True, highlight=False, markup=False)
+                with TabbedContent(id="tabs"):
+                    with TabPane("Pipeline Output", id="tab_logs"):
+                        yield RichLog(id="log", wrap=True, highlight=True, markup=True)
+                    with TabPane("Detected Sources", id="tab_sources"):
+                        yield DataTable(id="sources_table", cursor_type="row", zebra_stripes=True)
+                    with TabPane("Saved Log File", id="tab_saved_log"):
+                        yield RichLog(id="saved_log_text", wrap=True, highlight=False, markup=False)
 
         yield Footer()
 
@@ -602,12 +636,17 @@ class IntegralTUI(App):
 
         elif event.select.id == "energy_preset":
             custom_input = next(iter(self.query("#custom_bands")), None)
+            custom_box = next(iter(self.query("#custom_bands_box")), None)
             if custom_input:
                 if event.value == "custom":
                     custom_input.disabled = False
+                    if custom_box:
+                        custom_box.remove_class("hidden")
                     custom_input.focus()
                 else:
                     custom_input.disabled = True
+                    if custom_box:
+                        custom_box.add_class("hidden")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "run":
