@@ -1,23 +1,18 @@
 name: Build and Publish OSA Docker Images
 
+# Automated push/PR builds are disabled to prevent long-running or failing CI runs.
+# Run this workflow manually via GitHub Actions 'Run workflow' (workflow_dispatch)
+# or when explicitly creating release tags.
 on:
-  push:
-    branches: [ main ]
-    paths:
-      - 'docker/**'
-      - '.github/workflows/docker-build-publish.yml'
-      - 'pyproject.toml'
-      - 'uv.lock'
-    tags: [ 'v*.*.*' ]
-  pull_request:
-    branches: [ main ]
-    paths:
-      - 'docker/**'
-      - '.github/workflows/docker-build-publish.yml'
   workflow_dispatch:
     inputs:
       build_arm64:
         description: 'Build native ARM64 image via QEMU? (Takes ~30-45m)'
+        required: true
+        type: boolean
+        default: false
+      push:
+        description: 'Push images to registry? (Requires DOCKERHUB_TOKEN)'
         required: true
         type: boolean
         default: false
@@ -83,7 +78,7 @@ jobs:
           echo "image_name=$DOCKER_USER/osa" >> $GITHUB_OUTPUT
 
       - name: Log in to Docker Hub
-        if: github.event_name != 'pull_request' && env.HAVE_SECRET == 'true'
+        if: inputs.push == true && env.HAVE_SECRET == 'true'
         env:
           HAVE_SECRET: ${{ secrets.DOCKERHUB_TOKEN != '' }}
         uses: docker/login-action@v3
@@ -107,7 +102,7 @@ jobs:
           context: .
           file: ${{ matrix.dockerfile }}
           platforms: ${{ matrix.platforms }}
-          push: ${{ github.event_name != 'pull_request' && secrets.DOCKERHUB_TOKEN != '' }}
+          push: ${{ inputs.push == true && secrets.DOCKERHUB_TOKEN != '' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.name }}
