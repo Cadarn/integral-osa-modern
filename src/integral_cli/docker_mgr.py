@@ -39,13 +39,20 @@ def build_image(
 
     if target_arch == "arm64":
         dockerfile = docker_dir / "Dockerfile.native-arm64"
-        image_name = f"integralsw/osa:{tag}-native-arm64" if tag != "latest" else "integralsw/osa:11-native-arm64"
+        image_name = (
+            f"integralsw/osa:{tag}-native-arm64"
+            if tag != "latest"
+            else "integralsw/osa:11-native-arm64"
+        )
         platform_arg = "--platform=linux/arm64"
     else:
         dockerfile = docker_dir / "Dockerfile.modern"
-        image_name = f"integralsw/osa:{tag}-modern-amd64" if tag != "latest" else "integralsw/osa:11-modern-amd64"
+        image_name = (
+            f"integralsw/osa:{tag}-modern-amd64"
+            if tag != "latest"
+            else "integralsw/osa:11-modern-amd64"
+        )
         platform_arg = "--platform=linux/amd64"
-
 
     console.print(
         Panel(
@@ -95,7 +102,9 @@ def find_symlink_targets(base_path: Path) -> set[Path]:
                     targets.add(resolved.parent)
                     targets.add(resolved.parents[1])
             except Exception as e:
-                console.print(f"[dim yellow]Warning: could not resolve symlink {p}: {e}[/dim yellow]")
+                console.print(
+                    f"[dim yellow]Warning: could not resolve symlink {p}: {e}[/dim yellow]"
+                )
     return targets
 
 
@@ -103,7 +112,9 @@ def find_symlink_targets(base_path: Path) -> set[Path]:
 def run_container(
     command: str | None = typer.Argument(None, help="Command to run inside the container"),
     image: str | None = typer.Option(None, "--image", "-i", help="Docker image override"),
-    workdir: Path | None = typer.Option(None, "--workdir", "-w", help="Host directory to mount as /home/integral"),
+    workdir: Path | None = typer.Option(
+        None, "--workdir", "-w", help="Host directory to mount as /home/integral"
+    ),
     gui: bool = typer.Option(False, "--gui", "-g", help="Enable X11 GUI forwarding"),
 ):
     """Launch the INTEGRAL OSA container with local data mounts and correct UID/GID."""
@@ -120,7 +131,9 @@ def run_container(
     gid = os.getgid()
 
     platform_flag = (
-        "--platform=linux/arm64" if ("arm64" in str(chosen_image) or "apple-silicon" in str(chosen_image)) else "--platform=linux/amd64"
+        "--platform=linux/arm64"
+        if ("arm64" in str(chosen_image) or "apple-silicon" in str(chosen_image))
+        else "--platform=linux/amd64"
     )
 
     docker_args = [
@@ -159,12 +172,18 @@ def run_container(
 
     if not command:
         # Interactive session
-        docker_args.extend(["-it", chosen_image, "bash", "-c", "source /init.sh 2>/dev/null || true; exec bash"])
-        console.print(f"[bold blue]Launching interactive OSA session ({chosen_image})...[/bold blue]")
+        docker_args.extend(
+            ["-it", chosen_image, "bash", "-c", "source /init.sh 2>/dev/null || true; exec bash"]
+        )
+        console.print(
+            f"[bold blue]Launching interactive OSA session ({chosen_image})...[/bold blue]"
+        )
         subprocess.run(docker_args, check=False)
     else:
         # Non-interactive command
-        docker_args.extend([chosen_image, "bash", "-c", f"source /init.sh 2>/dev/null || true; {command}"])
+        docker_args.extend(
+            [chosen_image, "bash", "-c", f"source /init.sh 2>/dev/null || true; {command}"]
+        )
         subprocess.run(docker_args, check=True)
 
 

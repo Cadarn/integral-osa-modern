@@ -23,11 +23,23 @@ benchmark_app = typer.Typer(help="Run performance benchmarks and multi-tier comp
 
 @benchmark_app.command("run")
 def run_benchmark(
-    scw_input: str = typer.Option("rev:0060:10", "--scws", "-s", help="Science Windows to benchmark (e.g. rev:0060:10 or rev:0060:5)"),
+    scw_input: str = typer.Option(
+        "rev:0060:10",
+        "--scws",
+        "-s",
+        help="Science Windows to benchmark (e.g. rev:0060:10 or rev:0060:5)",
+    ),
     e_min: str = typer.Option("18", "--e-min", help="Minimum energy in keV"),
     e_max: str = typer.Option("60", "--e-max", help="Maximum energy in keV"),
-    workdir: Path = typer.Option(Path.cwd() / "work_bench", "--workdir", "-w", help="Working directory for benchmark"),
-    output_json: Path | None = typer.Option(Path.cwd() / "benchmark_results.json", "--output", "-o", help="JSON output file for benchmark metrics"),
+    workdir: Path = typer.Option(
+        Path.cwd() / "work_bench", "--workdir", "-w", help="Working directory for benchmark"
+    ),
+    output_json: Path | None = typer.Option(
+        Path.cwd() / "benchmark_results.json",
+        "--output",
+        "-o",
+        help="JSON output file for benchmark metrics",
+    ),
 ):
     """Run comparative benchmark across legacy emulation vs native modernized components."""
     workdir.mkdir(parents=True, exist_ok=True)
@@ -40,13 +52,14 @@ def run_benchmark(
             f"• Energy Range:     [cyan]{e_min} - {e_max} keV[/cyan]\n"
             f"• Working Directory:[cyan]{workdir}[/cyan]\n"
             f"• Host Platform:    [cyan]{config.host_arch} (Apple Silicon ARM64)[/cyan]",
-
             title="Benchmark Suite",
         )
     )
 
     # 1. Benchmark Layer 1: Native ARM64 Python/Astropy/FITS stack
-    console.print("\n[bold cyan]1. Benchmarking Layer 1: Native ARM64 Python/Astropy Data Stack...[/bold cyan]")
+    console.print(
+        "\n[bold cyan]1. Benchmarking Layer 1: Native ARM64 Python/Astropy Data Stack...[/bold cyan]"
+    )
     t0 = time.perf_counter()
     try:
         cat_file = config.rep_base_prod / "cat" / "hec" / "gnrl_refr_cat_0043.fits"
@@ -65,14 +78,19 @@ def run_benchmark(
             "sources_indexed": count,
             "status": "SUCCESS",
         }
-        console.print(f"[bold green]✓ Native Python/Astropy indexed {count} sources in {layer1_time:.4f}s[/bold green]")
+        console.print(
+            f"[bold green]✓ Native Python/Astropy indexed {count} sources in {layer1_time:.4f}s[/bold green]"
+        )
     except Exception as e:
         results["layer1_native_python"] = {"error": str(e), "status": "FAILED"}
         console.print(f"[bold red]Layer 1 failed: {e}[/bold red]")
 
     # 2. Benchmark Full Reduction Pipeline
-    console.print(f"\n[bold cyan]2. Benchmarking Full Reduction & Mosaicing on {scw_input}...[/bold cyan]")
+    console.print(
+        f"\n[bold cyan]2. Benchmarking Full Reduction & Mosaicing on {scw_input}...[/bold cyan]"
+    )
     from integral_cli.analysis import run_ibis
+
     t0 = time.perf_counter()
     try:
         # Run reduction via CLI
@@ -96,7 +114,11 @@ def run_benchmark(
             with fits.open(mosa_res) as hdul:
                 for h in hdul:
                     # Same astropy HDUList/HDU stub imprecision as above.
-                    if h.data is not None and getattr(h.data, "names", None) and "DETSIG" in h.data.names:  # pyright: ignore[reportAttributeAccessIssue]
+                    if (
+                        h.data is not None
+                        and getattr(h.data, "names", None)
+                        and "DETSIG" in h.data.names
+                    ):  # pyright: ignore[reportAttributeAccessIssue]
                         source_count = len(h.data)  # pyright: ignore[reportAttributeAccessIssue]
                         if source_count > 0:
                             top_source = str(h.data["NAME"][0]).strip()  # pyright: ignore[reportAttributeAccessIssue]

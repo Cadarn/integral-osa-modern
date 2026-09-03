@@ -5,6 +5,7 @@ Local Data Management, HEASARC Async HTTP/2 Downloaders, and Staging Tools for I
 import asyncio
 import re
 import shutil
+import sys
 from pathlib import Path
 
 import httpx
@@ -17,14 +18,19 @@ from rich.progress import (
     SpinnerColumn,
     TextColumn,
 )
+from rich.prompt import Confirm
 from rich.table import Table
 
 from integral_cli.config import config
 from integral_cli.scw_utils import filter_pointing_scws
 
 console = Console()
-data_app = typer.Typer(help="Manage INTEGRAL archive data, local imports, and async HEASARC downloads")
-download_app = typer.Typer(help="Download Science Windows, calibration, and support data from HEASARC")
+data_app = typer.Typer(
+    help="Manage INTEGRAL archive data, local imports, and async HEASARC downloads"
+)
+download_app = typer.Typer(
+    help="Download Science Windows, calibration, and support data from HEASARC"
+)
 data_app.add_typer(download_app, name="download")
 
 HEASARC_FTP_BASE = "https://heasarc.gsfc.nasa.gov/FTP/integral/data"
@@ -47,7 +53,9 @@ def _resolve_instruments(instruments_opt: str) -> list[str]:
 
 def _validate_scope_flags(science_only: bool, calib_only: bool) -> None:
     if science_only and calib_only:
-        console.print("[bold red]Error: --science-only and --calib-only are mutually exclusive.[/bold red]")
+        console.print(
+            "[bold red]Error: --science-only and --calib-only are mutually exclusive.[/bold red]"
+        )
         raise typer.Exit(code=1)
 
 
@@ -102,7 +110,9 @@ async def async_list_scw_files(client: httpx.AsyncClient, scw_id: str) -> list[s
     scw_url = f"{HEASARC_FTP_BASE}/scw/{rev}/{scw_id}.001/"
     resp = await client.get(scw_url, timeout=30.0)
     if resp.status_code != 200:
-        console.print(f"[red]ScW {scw_id} directory not found on server (HTTP {resp.status_code})[/red]")
+        console.print(
+            f"[red]ScW {scw_id} directory not found on server (HTTP {resp.status_code})[/red]"
+        )
         return []
 
     file_matches = re.findall(r'href="([^"?/][^"]*)"', resp.text)
@@ -129,7 +139,12 @@ async def async_download_scw_files(
         async with semaphore:
             target = scw_dir / filename
             return await async_download_file(
-                client, f"{scw_url}{filename}", target, progress=progress, task_id=task_id, force=force
+                client,
+                f"{scw_url}{filename}",
+                target,
+                progress=progress,
+                task_id=task_id,
+                force=force,
             )
 
     results = await asyncio.gather(*(fetch(f) for f in filenames))
@@ -141,7 +156,9 @@ async def async_list_remote_scws(client: httpx.AsyncClient, rev_id: str) -> list
     rev_url = f"{HEASARC_FTP_BASE}/scw/{rev_id}/"
     resp = await client.get(rev_url, timeout=30.0)
     if resp.status_code != 200:
-        console.print(f"[red]Revolution {rev_id} not found on server (HTTP {resp.status_code})[/red]")
+        console.print(
+            f"[red]Revolution {rev_id} not found on server (HTTP {resp.status_code})[/red]"
+        )
         return []
 
     matches = re.findall(r'href="(\d{12})\.001/"', resp.text)
@@ -163,7 +180,9 @@ async def async_download_aux(
     try:
         resp = await client.get(aux_url, timeout=30.0)
         if resp.status_code != 200:
-            console.print(f"[red]Aux data for revolution {rev_id} not found on server (HTTP {resp.status_code})[/red]")
+            console.print(
+                f"[red]Aux data for revolution {rev_id} not found on server (HTTP {resp.status_code})[/red]"
+            )
             return 0
 
         file_matches = re.findall(r'href="([^"?/][^"]*)"', resp.text)
@@ -172,13 +191,150 @@ async def async_download_aux(
         async def fetch(filename: str) -> bool:
             async with semaphore:
                 target = aux_dir / filename
-                return await async_download_file(client, f"{aux_url}{filename}", target, force=force)
+                return await async_download_file(
+                    client, f"{aux_url}{filename}", target, force=force
+                )
 
         results = await asyncio.gather(*(fetch(f) for f in valid_files))
         return sum(1 for r in results if r)
     except Exception as e:
         console.print(f"[red]Failed to download aux data for revolution {rev_id}: {e}[/red]")
         return 0
+
+
+async def async_download_rev_context(
+    client: httpx.AsyncClient,
+    rev_id: str,
+    dest_base: Path,
+    semaphore: asyncio.Semaphore,
+    force: bool = False,
+) -> int:
+    """Download the revolution context tree under scw/<REV>/rev.001/ required by OSA pipelines."""
+    rev_url = f"{HEASARC_FTP_BASE}/scw/{rev_id}/rev.001/"
+    local_rev_dir = dest_base / "scw" / rev_id / "rev.001"
+    local_rev_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        resp = await client.get(rev_url, timeout=30.0)
+        if resp.status_code != 200:
+            console.print(
+                f"[dim yellow]Notice: Revolution context rev.001 not found for rev {rev_id} (HTTP {resp.status_code})[/dim yellow]"
+            )
+            return 0
+
+        # Scan and download rev.001 subdirectories (idx, aca, cfg, osm, prp, raw)
+        async def fetch_dir(rel_path: str, target_dir: Path) -> int:
+            target_dir.mkdir(parents=True, exist_ok=True)
+            u = f"{rev_url}{rel_path}"
+            r = await client.get(u, timeout=30.0)
+            if r.status_code != 200:
+                return 0
+            hrefs = re.findall(r'href="([^"?/][^"]*)"', r.text)
+            subdirs = [
+                h.rstrip("/")
+                for h in hrefs
+                if h.endswith("/") and not h.startswith(".") and not h.startswith("/")
+            ]
+            files = [
+                h
+                for h in hrefs
+                if not h.endswith("/")
+                and not h.startswith("?")
+                and not h.startswith("/")
+                and "." in h
+            ]
+
+            tasks = []
+            for fn in files:
+                target = target_dir / fn
+                tasks.append(async_download_file(client, f"{u}{fn}", target, force=force))
+
+            res = await asyncio.gather(*tasks) if tasks else []
+            cnt = sum(1 for x in res if x)
+            for sd in subdirs:
+                cnt += await fetch_dir(f"{rel_path}{sd}/", target_dir / sd)
+            return cnt
+
+        console.print(
+            f"[bold blue]Syncing revolution context (scw/{rev_id}/rev.001/)...[/bold blue]"
+        )
+        count = await fetch_dir("", local_rev_dir)
+        console.print(
+            f"[bold green]✓ Revolution {rev_id} context synced ({count} files).[/bold green]"
+        )
+        return count
+    except Exception as e:
+        console.print(
+            f"[dim red]Warning: failed downloading revolution context for {rev_id}: {e}[/dim red]"
+        )
+        return 0
+
+
+async def async_download_aux_ref(
+    client: httpx.AsyncClient,
+    dest_base: Path,
+    force: bool = False,
+) -> int:
+    """Download essential aux/adp/ref reference data (tcoroffset, leap, de200, irot) for time conversion."""
+    tcor_url = f"{HEASARC_FTP_BASE}/aux/adp/ref/tcoroffset/"
+    local_tcor_dir = dest_base / "aux" / "adp" / "ref" / "tcoroffset"
+    local_tcor_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        resp = await client.get(tcor_url, timeout=30.0)
+        if resp.status_code != 200:
+            return 0
+        file_matches = re.findall(r'href="([^"?/]+\.fits(?:\.gz)?)"', resp.text)
+        tasks = [
+            async_download_file(client, f"{tcor_url}{fn}", local_tcor_dir / fn, force=force)
+            for fn in file_matches
+        ]
+        results = await asyncio.gather(*tasks)
+        return sum(1 for r in results if r)
+    except Exception as e:
+        console.print(f"[dim red]Warning: failed downloading aux/adp/ref data: {e}[/dim red]")
+        return 0
+
+
+def clean_ic_master_file(dest_base: Path):
+    """Prune missing instrument indexes from ic_master_file.fits to prevent DAL status -2004 orphan errors."""
+    idx_dir = dest_base / "idx" / "ic"
+    master_path = idx_dir / "ic_master_file.fits"
+    if not master_path.exists():
+        return
+
+    try:
+        from astropy.io import fits
+
+        with fits.open(master_path, mode="update") as master:
+            if len(master) < 3 or "GROUPING" not in master[2].header.get("EXTNAME", ""):
+                return
+            data = master[2].data
+            keep_indices = []
+            for idx, row in enumerate(data):
+                sub_idx_name = row["MEMBER_LOCATION"]
+                sub_idx_path = idx_dir / sub_idx_name
+                if not sub_idx_path.exists():
+                    continue
+                all_exist = True
+                with fits.open(sub_idx_path) as sub:
+                    for sub_row in sub[1].data:
+                        mem_loc = sub_row["MEMBER_LOCATION"]
+                        target = (idx_dir / mem_loc).resolve()
+                        if not target.exists():
+                            all_exist = False
+                            break
+                if all_exist:
+                    keep_indices.append(idx)
+
+            if len(keep_indices) != len(data):
+                new_table = fits.BinTableHDU(data=data[keep_indices], header=master[2].header)
+                master[2] = new_table
+                master.flush()
+    except Exception as e:
+        console.print(
+            f"[dim yellow]Notice: ic_master_file pruning check skipped ({e})[/dim yellow]"
+        )
 
 
 async def async_download_ic_index(client: httpx.AsyncClient, dest_base: Path, force: bool = False):
@@ -198,7 +354,10 @@ async def async_download_ic_index(client: httpx.AsyncClient, dest_base: Path, fo
         fits_files = sorted(set(file_matches))
 
         console.print(f"Downloading {len(fits_files)} IC index files via async HTTP/2...")
-        tasks = [async_download_file(client, f"{idx_url}{fn}", idx_dir / fn, force=force) for fn in fits_files]
+        tasks = [
+            async_download_file(client, f"{idx_url}{fn}", idx_dir / fn, force=force)
+            for fn in fits_files
+        ]
 
         await asyncio.gather(*tasks)
         console.print(f"[bold green]✓ IC index files downloaded to {idx_dir}[/bold green]")
@@ -222,18 +381,28 @@ async def scan_and_download_ic_dir(
             return
 
         hrefs = re.findall(r'href="([^"?][^"]*)"', resp.text)
-        subdirs = [h.rstrip("/") for h in hrefs if h.endswith("/") and not h.startswith(".") and not h.startswith("/")]
-        files = [h for h in hrefs if not h.endswith("/") and not h.startswith("?") and not h.startswith("/") and "." in h]
+        subdirs = [
+            h.rstrip("/")
+            for h in hrefs
+            if h.endswith("/") and not h.startswith(".") and not h.startswith("/")
+        ]
+        files = [
+            h
+            for h in hrefs
+            if not h.endswith("/") and not h.startswith("?") and not h.startswith("/") and "." in h
+        ]
 
         download_tasks = []
         for fn in files:
             target = local_dir / fn
             if force or not target.exists():
+
                 async def fetch(url, dest):
                     async with semaphore:
                         res = await async_download_file(client, url, dest, force=force)
                         progress.advance(task_id, 1)
                         return res
+
                 download_tasks.append(fetch(f"{base_url}{fn}", target))
             else:
                 progress.advance(task_id, 1)
@@ -277,19 +446,25 @@ async def async_download_ic_tree(
 
     with Progress(
         SpinnerColumn(),
-        TextColumn(f"[bold cyan]Downloading IC ({instrument}{'/' + subtree if subtree else ''})...[/bold cyan]"),
+        TextColumn(
+            f"[bold cyan]Downloading IC ({instrument}{'/' + subtree if subtree else ''})...[/bold cyan]"
+        ),
         BarColumn(),
         TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
         TextColumn("({task.completed} files)"),
         console=console,
     ) as progress:
         task_id = progress.add_task("download", total=None)
-        await scan_and_download_ic_dir(client, inst_url, inst_dir, semaphore, progress, task_id, force=force)
+        await scan_and_download_ic_dir(
+            client, inst_url, inst_dir, semaphore, progress, task_id, force=force
+        )
 
     console.print(f"[bold green]✓ IC tree for {instrument} synced to {inst_dir}[/bold green]")
 
 
-async def _download_catalogs(client: httpx.AsyncClient, dest_base: Path, cat_version: str, force: bool = False):
+async def _download_catalogs(
+    client: httpx.AsyncClient, dest_base: Path, cat_version: str, force: bool = False
+):
     """Ensure the general reference catalog and OMC catalog are present."""
     cat_hec_dir = dest_base / "cat" / "hec"
     cat_hec_dir.mkdir(parents=True, exist_ok=True)
@@ -302,10 +477,19 @@ async def _download_catalogs(client: httpx.AsyncClient, dest_base: Path, cat_ver
 
     tasks = []
     if force or not target_fits.exists():
-        tasks.append(async_download_file(client, f"{HEASARC_FTP_BASE}/cat/hec/{cat_filename}", target_fits, force=force))
+        tasks.append(
+            async_download_file(
+                client, f"{HEASARC_FTP_BASE}/cat/hec/{cat_filename}", target_fits, force=force
+            )
+        )
     if force or not omc_target.exists():
         tasks.append(
-            async_download_file(client, f"{HEASARC_FTP_BASE}/cat/omc/omc_refr_cat_0005.fits", omc_target, force=force)
+            async_download_file(
+                client,
+                f"{HEASARC_FTP_BASE}/cat/omc/omc_refr_cat_0005.fits",
+                omc_target,
+                force=force,
+            )
         )
 
     if tasks:
@@ -356,12 +540,16 @@ async def _run_data_download(
     revisions = sorted({s[:4] for s in scw_ids})
 
     if fetch_science and scw_ids:
-        console.print(f"[bold blue]Listing files for {len(scw_ids)} Science Window(s)...[/bold blue]")
+        console.print(
+            f"[bold blue]Listing files for {len(scw_ids)} Science Window(s)...[/bold blue]"
+        )
         listings = await asyncio.gather(*(async_list_scw_files(client, s) for s in scw_ids))
         total_files = sum(len(f) for f in listings)
 
         if dry_run:
-            console.print(f"[yellow]Dry run: would download {total_files} file(s) across {len(scw_ids)} ScW(s).[/yellow]")
+            console.print(
+                f"[yellow]Dry run: would download {total_files} file(s) across {len(scw_ids)} ScW(s).[/yellow]"
+            )
         elif total_files == 0:
             console.print("[yellow]No Science Window files found to download.[/yellow]")
         else:
@@ -377,27 +565,53 @@ async def _run_data_download(
                 results = await asyncio.gather(
                     *(
                         async_download_scw_files(
-                            client, scw_id, files, dest_base, semaphore, progress=progress, task_id=task_id, force=force
+                            client,
+                            scw_id,
+                            files,
+                            dest_base,
+                            semaphore,
+                            progress=progress,
+                            task_id=task_id,
+                            force=force,
                         )
                         for scw_id, files in zip(scw_ids, listings)
                     )
                 )
-            console.print(f"[bold green]✓ Downloaded {sum(results)} files across {len(scw_ids)} Science Window(s).[/bold green]")
+            console.print(
+                f"[bold green]✓ Downloaded {sum(results)} files across {len(scw_ids)} Science Window(s).[/bold green]"
+            )
 
     if fetch_calib:
         if dry_run:
             rev_desc = ", ".join(revisions) if revisions else "none (no Science Windows specified)"
-            ic_desc = f"IC trees for {instruments}" if ic_trees else "IC trees (skipped - pass --ic-trees to include)"
+            ic_desc = (
+                f"IC trees for {instruments}"
+                if ic_trees
+                else "IC trees (skipped - pass --ic-trees to include)"
+            )
             console.print(
                 f"[yellow]Dry run: would ensure catalogs, IC index, {ic_desc}, "
                 f"and aux data for revolution(s): {rev_desc}.[/yellow]"
             )
         else:
-            await _download_calibration(client, dest_base, semaphore, instruments, cat_version, force, ic_trees=ic_trees)
+            await _download_calibration(
+                client, dest_base, semaphore, instruments, cat_version, force, ic_trees=ic_trees
+            )
+            # Ensure essential mission time reference tables (tcoroffset) are present
+            await async_download_aux_ref(client, dest_base, force=force)
             for rev_id in revisions:
-                console.print(f"[bold blue]Fetching aux data for revolution {rev_id}...[/bold blue]")
+                console.print(
+                    f"[bold blue]Fetching aux data for revolution {rev_id}...[/bold blue]"
+                )
                 count = await async_download_aux(client, rev_id, dest_base, semaphore, force=force)
-                console.print(f"[bold green]✓ Aux data for revolution {rev_id} ready ({count} files).[/bold green]")
+                console.print(
+                    f"[bold green]✓ Aux data for revolution {rev_id} ready ({count} files).[/bold green]"
+                )
+                # Fetch revolution context files (rev.001) required for ScW processing
+                await async_download_rev_context(client, rev_id, dest_base, semaphore, force=force)
+
+            # Ensure ic_master_file.fits does not reference non-downloaded instrument categories
+            clean_ic_master_file(dest_base)
 
 
 def init_workspace(target_path: Path):
@@ -427,7 +641,7 @@ def init_repo(
         "--path",
         "-p",
         help="Target base directory for INTEGRAL data archive",
-    )
+    ),
 ):
     """Initialise local data archive structure with standard subdirectories."""
     init_workspace(path)
@@ -444,9 +658,15 @@ def init_repo(
 
 @data_app.command("import-local")
 def import_local(
-    source_dir: Path = typer.Argument(..., help="Source directory containing revolution data (e.g. ~/Sites/0060/0060)"),
-    revolution: str = typer.Option("", "--rev", "-r", help="Revolution number (e.g. 0060, auto-detected if omitted)"),
-    link: bool = typer.Option(False, "--link", "-l", help="Create symlinks instead of copying files"),
+    source_dir: Path = typer.Argument(
+        ..., help="Source directory containing revolution data (e.g. ~/Sites/0060/0060)"
+    ),
+    revolution: str = typer.Option(
+        "", "--rev", "-r", help="Revolution number (e.g. 0060, auto-detected if omitted)"
+    ),
+    link: bool = typer.Option(
+        False, "--link", "-l", help="Create symlinks instead of copying files"
+    ),
 ):
     """Import local Revolution data into the standard archive hierarchy."""
     if not source_dir.exists():
@@ -464,7 +684,9 @@ def import_local(
             rev_id = "0060"
 
     rev_id = f"{int(rev_id):04d}"
-    console.print(f"[bold blue]Importing Revolution {rev_id} from {source_dir} into {dest_base}...[/bold blue]")
+    console.print(
+        f"[bold blue]Importing Revolution {rev_id} from {source_dir} into {dest_base}...[/bold blue]"
+    )
 
     scw_dest_dir = dest_base / "scw" / rev_id
     scw_dest_dir.mkdir(parents=True, exist_ok=True)
@@ -531,12 +753,19 @@ _SCOPE_HELP = {
 def download_revolution(
     rev: str = typer.Argument(..., help="Revolution number, e.g. 0060"),
     count: int | None = typer.Option(
-        None, "--count", "-n", help="Fetch only the first N pointing ScWs (default: every pointing ScW)"
+        None,
+        "--count",
+        "-n",
+        help="Fetch only the first N pointing ScWs (default: every pointing ScW)",
     ),
     id_from: str | None = typer.Option(
-        None, "--from", help="Explicit range start (12-digit ScW ID, inclusive) - overrides --count and includes non-pointing ScWs"
+        None,
+        "--from",
+        help="Explicit range start (12-digit ScW ID, inclusive) - overrides --count and includes non-pointing ScWs",
     ),
-    id_to: str | None = typer.Option(None, "--to", help="Explicit range end (12-digit ScW ID, inclusive)"),
+    id_to: str | None = typer.Option(
+        None, "--to", help="Explicit range end (12-digit ScW ID, inclusive)"
+    ),
     science_only: bool = typer.Option(False, "--science-only", help=_SCOPE_HELP["science_only"]),
     calib_only: bool = typer.Option(False, "--calib-only", help=_SCOPE_HELP["calib_only"]),
     instruments: str = typer.Option("", "--instruments", help=_SCOPE_HELP["instruments"]),
@@ -545,16 +774,43 @@ def download_revolution(
     concurrency: int = typer.Option(16, "--concurrency", "-j", help=_SCOPE_HELP["concurrency"]),
     force_refresh: bool = typer.Option(False, "--force-refresh", help=_SCOPE_HELP["force_refresh"]),
     dry_run: bool = typer.Option(False, "--dry-run", help=_SCOPE_HELP["dry_run"]),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Non-interactive mode: accept all defaults and skip confirmation"
+    ),
 ):
     """Download a whole revolution (or a slice of it) plus its calibration/support data."""
     _validate_scope_flags(science_only, calib_only)
     rev_id = f"{int(rev):04d}"
+    resolved_insts = _resolve_instruments(instruments)
+
+    if sys.stdin.isatty() and not yes and not dry_run:
+        scope_str = (
+            "Science only"
+            if science_only
+            else ("Calibration only" if calib_only else "Science & Calibration")
+        )
+        console.print(
+            Panel(
+                f"[bold green]Download Plan: Revolution {rev_id}[/bold green]\n\n"
+                f"• Target Scope:   [cyan]{scope_str}[/cyan]\n"
+                f"• Instruments:    [cyan]{', '.join(resolved_insts)}[/cyan]\n"
+                f"• Full IC Trees:  [cyan]{'Enabled (multi-GB)' if ic_trees else 'Minimal (indexes, rev context, reference data)'}[/cyan]\n"
+                f"• Pointing Limit: [cyan]{count if count else 'All pointing Science Windows'}[/cyan]\n"
+                f"• Destination:    [cyan]{config.rep_base_prod}[/cyan]",
+                title="Download Confirmation",
+            )
+        )
+        if not Confirm.ask("Proceed with download?", default=True):
+            console.print("[yellow]Download cancelled by user.[/yellow]")
+            raise typer.Exit(code=0)
 
     async def _main():
         async with httpx.AsyncClient(http2=True, follow_redirects=True) as client:
             all_ids = await async_list_remote_scws(client, rev_id)
             if not all_ids:
-                console.print(f"[bold red]Error: no Science Windows found for revolution {rev_id} on the server.[/bold red]")
+                console.print(
+                    f"[bold red]Error: no Science Windows found for revolution {rev_id} on the server.[/bold red]"
+                )
                 raise typer.Exit(code=1)
 
             if id_from or id_to:
@@ -571,7 +827,7 @@ def download_revolution(
                 scw_ids,
                 fetch_science=not calib_only,
                 fetch_calib=not science_only,
-                instruments=_resolve_instruments(instruments),
+                instruments=resolved_insts,
                 cat_version=cat_version,
                 concurrency=concurrency,
                 force=force_refresh,
@@ -584,7 +840,9 @@ def download_revolution(
 
 @download_app.command("scw")
 def download_scw_cmd(
-    scw_spec: str = typer.Argument(..., help="A ScW ID (e.g. 006000010010) or comma-separated list of ScW IDs"),
+    scw_spec: str = typer.Argument(
+        ..., help="A ScW ID (e.g. 006000010010) or comma-separated list of ScW IDs"
+    ),
     science_only: bool = typer.Option(False, "--science-only", help=_SCOPE_HELP["science_only"]),
     calib_only: bool = typer.Option(False, "--calib-only", help=_SCOPE_HELP["calib_only"]),
     instruments: str = typer.Option("", "--instruments", help=_SCOPE_HELP["instruments"]),
@@ -593,6 +851,9 @@ def download_scw_cmd(
     concurrency: int = typer.Option(16, "--concurrency", "-j", help=_SCOPE_HELP["concurrency"]),
     force_refresh: bool = typer.Option(False, "--force-refresh", help=_SCOPE_HELP["force_refresh"]),
     dry_run: bool = typer.Option(False, "--dry-run", help=_SCOPE_HELP["dry_run"]),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Non-interactive mode: accept all defaults and skip confirmation"
+    ),
 ):
     """Download one or more specific Science Windows plus their calibration/support data."""
     _validate_scope_flags(science_only, calib_only)
@@ -601,6 +862,28 @@ def download_scw_cmd(
         if len(scw_id) != 12 or not scw_id.isdigit():
             console.print(f"[bold red]Error: '{scw_id}' is not a valid 12-digit ScW ID.[/bold red]")
             raise typer.Exit(code=1)
+
+    resolved_insts = _resolve_instruments(instruments)
+    if sys.stdin.isatty() and not yes and not dry_run:
+        scope_str = (
+            "Science only"
+            if science_only
+            else ("Calibration only" if calib_only else "Science & Calibration")
+        )
+        console.print(
+            Panel(
+                f"[bold green]Download Plan: {len(scw_ids)} Science Window(s)[/bold green]\n\n"
+                f"• Target ScWs:    [cyan]{', '.join(scw_ids[:5])}{'...' if len(scw_ids) > 5 else ''}[/cyan]\n"
+                f"• Target Scope:   [cyan]{scope_str}[/cyan]\n"
+                f"• Instruments:    [cyan]{', '.join(resolved_insts)}[/cyan]\n"
+                f"• Full IC Trees:  [cyan]{'Enabled (multi-GB)' if ic_trees else 'Minimal (indexes, rev context, reference data)'}[/cyan]\n"
+                f"• Destination:    [cyan]{config.rep_base_prod}[/cyan]",
+                title="Download Confirmation",
+            )
+        )
+        if not Confirm.ask("Proceed with download?", default=True):
+            console.print("[yellow]Download cancelled by user.[/yellow]")
+            raise typer.Exit(code=0)
 
     async def _main():
         async with httpx.AsyncClient(http2=True, follow_redirects=True) as client:
@@ -623,7 +906,9 @@ def download_scw_cmd(
 
 @download_app.command("file")
 def download_file_cmd(
-    path: Path = typer.Argument(..., help="Text file with one ScW ID per line (# comments allowed)"),
+    path: Path = typer.Argument(
+        ..., help="Text file with one ScW ID per line (# comments allowed)"
+    ),
     science_only: bool = typer.Option(False, "--science-only", help=_SCOPE_HELP["science_only"]),
     calib_only: bool = typer.Option(False, "--calib-only", help=_SCOPE_HELP["calib_only"]),
     instruments: str = typer.Option("", "--instruments", help=_SCOPE_HELP["instruments"]),
@@ -639,7 +924,11 @@ def download_file_cmd(
         console.print(f"[bold red]Error: {path} does not exist.[/bold red]")
         raise typer.Exit(code=1)
 
-    scw_ids = [line.strip() for line in path.read_text().splitlines() if line.strip() and not line.startswith("#")]
+    scw_ids = [
+        line.strip()
+        for line in path.read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
     if not scw_ids:
         console.print(f"[bold red]Error: no ScW IDs found in {path}.[/bold red]")
         raise typer.Exit(code=1)
@@ -680,12 +969,24 @@ def download_calibration_cmd(
     async def _main():
         async with httpx.AsyncClient(http2=True, follow_redirects=True) as client:
             if dry_run:
-                ic_desc = f"IC trees for {resolved_instruments}" if ic_trees else "IC trees (skipped - pass --ic-trees to include)"
-                console.print(f"[yellow]Dry run: would ensure catalogs, IC index, and {ic_desc}.[/yellow]")
+                ic_desc = (
+                    f"IC trees for {resolved_instruments}"
+                    if ic_trees
+                    else "IC trees (skipped - pass --ic-trees to include)"
+                )
+                console.print(
+                    f"[yellow]Dry run: would ensure catalogs, IC index, and {ic_desc}.[/yellow]"
+                )
                 return
             semaphore = asyncio.Semaphore(concurrency)
             await _download_calibration(
-                client, config.rep_base_prod, semaphore, resolved_instruments, cat_version, force_refresh, ic_trees=ic_trees
+                client,
+                config.rep_base_prod,
+                semaphore,
+                resolved_instruments,
+                cat_version,
+                force_refresh,
+                ic_trees=ic_trees,
             )
 
     asyncio.run(_main())
@@ -696,7 +997,11 @@ def archive_status():
     """Detailed audit of local archive showing exact counts for Catalogs, Indexes, and IC trees."""
     dest_base = config.rep_base_prod
 
-    console.print(Panel(f"[bold green]INTEGRAL Local Archive Audit[/bold green]\nLocation: [cyan]{dest_base}[/cyan]"))
+    console.print(
+        Panel(
+            f"[bold green]INTEGRAL Local Archive Audit[/bold green]\nLocation: [cyan]{dest_base}[/cyan]"
+        )
+    )
 
     table = Table(title="Archive Components Summary")
     table.add_column("Category", style="cyan")
@@ -705,7 +1010,9 @@ def archive_status():
 
     # 1. Catalogs
     cat_files = list((dest_base / "cat").glob("**/*.fits")) if (dest_base / "cat").exists() else []
-    table.add_row("Catalogs", ", ".join([f.name for f in cat_files]) or "None", f"{len(cat_files)} files")
+    table.add_row(
+        "Catalogs", ", ".join([f.name for f in cat_files]) or "None", f"{len(cat_files)} files"
+    )
 
     # 2. Indexes
     idx_files = list((dest_base / "idx").glob("**/*.fits")) if (dest_base / "idx").exists() else []
@@ -727,7 +1034,11 @@ def archive_status():
         for rev_dir in sorted(scw_path.iterdir()):
             if rev_dir.is_dir():
                 scw_cnt = len(list(rev_dir.iterdir()))
-                table.add_row(f"Revolution {rev_dir.name}", f"scw/{rev_dir.name}/", f"{scw_cnt} Science Windows")
+                table.add_row(
+                    f"Revolution {rev_dir.name}",
+                    f"scw/{rev_dir.name}/",
+                    f"{scw_cnt} Science Windows",
+                )
 
     # 5. Aux data
     aux_path = dest_base / "aux" / "adp"
@@ -735,6 +1046,10 @@ def archive_status():
         for rev_dir in sorted(aux_path.iterdir()):
             if rev_dir.is_dir():
                 aux_cnt = len(list(rev_dir.glob("*")))
-                table.add_row(f"Aux (Revolution {rev_dir.name.split('.')[0]})", f"aux/adp/{rev_dir.name}/", f"{aux_cnt} files")
+                table.add_row(
+                    f"Aux (Revolution {rev_dir.name.split('.')[0]})",
+                    f"aux/adp/{rev_dir.name}/",
+                    f"{aux_cnt} files",
+                )
 
     console.print(table)

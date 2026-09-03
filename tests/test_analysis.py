@@ -5,7 +5,31 @@ from pathlib import Path
 import pytest
 import typer
 
-from integral_cli.analysis import _resolve_scw_ids
+from integral_cli.analysis import _resolve_scw_ids, parse_energy_bands
+
+
+def test_parse_energy_bands_single():
+    mins, maxs, n = parse_energy_bands("18-60")
+    assert mins == "18"
+    assert maxs == "60"
+    assert n == 1
+
+
+def test_parse_energy_bands_multi():
+    mins, maxs, n = parse_energy_bands("20-40, 40-100")
+    assert mins == "20 40"
+    assert maxs == "40 100"
+    assert n == 2
+
+
+def test_parse_energy_bands_overlap_error():
+    with pytest.raises(ValueError, match="Overlapping energy bands"):
+        parse_energy_bands("20-50, 40-100")
+
+
+def test_parse_energy_bands_inverted_bounds():
+    with pytest.raises(ValueError, match="must be strictly less"):
+        parse_energy_bands("60-20")
 
 
 def test_bare_scw_id_passthrough():
@@ -13,6 +37,7 @@ def test_bare_scw_id_passthrough():
 
 
 def test_comma_separated_list():
+
     assert _resolve_scw_ids("006000010010,006000020010") == [
         "006000010010",
         "006000020010",
@@ -69,9 +94,7 @@ def test_revolution_spec_falls_back_when_no_pointing_scws(
     assert _resolve_scw_ids("rev:0060") == ["006000010020", "006000020030"]
 
 
-def test_revolution_spec_missing_directory_exits(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+def test_revolution_spec_missing_directory_exits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("REP_BASE_PROD", str(tmp_path))
     with pytest.raises(typer.Exit):
         _resolve_scw_ids("rev:0099")

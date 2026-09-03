@@ -22,7 +22,6 @@ class IntegralConfig(BaseModel):
     ref_catalog: str = "/data/cat/hec/gnrl_refr_cat_0043.fits"
     omc_catalog: str = "/data/cat/omc/omc_refr_cat_0005.fits"
 
-
     @property
     def rep_base_prod(self) -> Path:
         env_val = os.environ.get("REP_BASE_PROD")
@@ -48,7 +47,10 @@ class IntegralConfig(BaseModel):
                     data = json.load(f)
                 return cls(**data)
             except Exception as e:
-                print(f"Warning: failed to read {CONFIG_FILE}, falling back to defaults: {e}", file=sys.stderr)
+                print(
+                    f"Warning: failed to read {CONFIG_FILE}, falling back to defaults: {e}",
+                    file=sys.stderr,
+                )
         config = cls()
         config.save()
         return config
