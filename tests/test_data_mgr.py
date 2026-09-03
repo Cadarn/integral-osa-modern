@@ -130,7 +130,9 @@ def test_download_revolution_applies_count_after_pointing_filter(monkeypatch):
     monkeypatch.setattr(data_mgr, "async_list_remote_scws", fake_list_remote_scws)
     monkeypatch.setattr(data_mgr, "_run_data_download", fake_run_data_download)
 
-    result = runner.invoke(app, ["data", "download", "revolution", "0060", "--count", "1", "--dry-run"])
+    result = runner.invoke(
+        app, ["data", "download", "revolution", "0060", "--count", "1", "--dry-run"]
+    )
 
     assert result.exit_code == 0, result.output
     assert calls["scw_ids"] == ["006000010010"]
@@ -152,8 +154,14 @@ def test_download_revolution_explicit_range_bypasses_pointing_filter(monkeypatch
     result = runner.invoke(
         app,
         [
-            "data", "download", "revolution", "0060",
-            "--from", "006000010010", "--to", "006000010021",
+            "data",
+            "download",
+            "revolution",
+            "0060",
+            "--from",
+            "006000010010",
+            "--to",
+            "006000010021",
         ],
     )
 

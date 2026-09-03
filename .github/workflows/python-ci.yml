@@ -3,24 +3,9 @@ name: Python CI
 on:
   push:
     branches: [ main ]
-    paths:
-      - 'src/**'
-      - 'scripts/**'
-      - 'pipeline/**'
-      - 'tests/**'
-      - 'pyproject.toml'
-      - 'uv.lock'
-      - '.github/workflows/python-ci.yml'
   pull_request:
     branches: [ main ]
-    paths:
-      - 'src/**'
-      - 'scripts/**'
-      - 'pipeline/**'
-      - 'tests/**'
-      - 'pyproject.toml'
-      - 'uv.lock'
-      - '.github/workflows/python-ci.yml'
+
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

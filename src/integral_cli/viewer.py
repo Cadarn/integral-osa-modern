@@ -14,9 +14,15 @@ view_app = typer.Typer(help="Inspect and visualise INTEGRAL FITS products and so
 
 @view_app.command("image")
 def view_image(
-    fits_path: Path = typer.Argument(..., help="Path to FITS image file (e.g. isgri_mosa_ima.fits, isgri_sky_ima.fits)"),
-    ext: int | None = typer.Option(None, "--ext", "-e", help="Optional extension number (HDU index) to render"),
-    output: Path | None = typer.Option(None, "--output", "-o", help="Optional output PNG image path"),
+    fits_path: Path = typer.Argument(
+        ..., help="Path to FITS image file (e.g. isgri_mosa_ima.fits, isgri_sky_ima.fits)"
+    ),
+    ext: int | None = typer.Option(
+        None, "--ext", "-e", help="Optional extension number (HDU index) to render"
+    ),
+    output: Path | None = typer.Option(
+        None, "--output", "-o", help="Optional output PNG image path"
+    ),
     title: str | None = typer.Option(None, "--title", "-t", help="Plot title"),
 ):
     """Render a 2D FITS image with WCS equatorial coordinates and save/display."""
@@ -28,6 +34,7 @@ def view_image(
         import matplotlib
         from astropy.io import fits
         from astropy.visualization import ImageNormalize, ZScaleInterval
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         from astropy.wcs import WCS
@@ -49,7 +56,9 @@ def view_image(
                         break
 
             if target_hdu is None:
-                console.print(f"[bold red]Error: No 2D image HDU found in {fits_path.name}.[/bold red]")
+                console.print(
+                    f"[bold red]Error: No 2D image HDU found in {fits_path.name}.[/bold red]"
+                )
                 raise typer.Exit(code=1)
 
             # Same astropy HDUList/HDU stub imprecision as above.
@@ -83,7 +92,10 @@ def view_image(
             plt.savefig(out_file, bbox_inches="tight")
             plt.close(fig)
 
-            console.print(f"[bold green]✓ Rendered {fits_path.name} [{target_hdu.name}] -> {out_file}[/bold green]")  # pyright: ignore[reportAttributeAccessIssue]
+            target_name = getattr(target_hdu, "name", "IMAGE")
+            console.print(
+                f"[bold green]✓ Rendered {fits_path.name} [{target_name}] -> {out_file}[/bold green]"
+            )
 
     except Exception as e:
         console.print(f"[bold red]Failed to visualise FITS image: {e}[/bold red]")
@@ -92,8 +104,12 @@ def view_image(
 
 @view_app.command("sources")
 def view_sources(
-    fits_path: Path = typer.Argument(..., help="Path to source results FITS file (e.g. isgri_mosa_res.fits, isgri_srcl_res.fits)"),
-    min_snr: float = typer.Option(3.0, "--min-snr", "-s", help="Minimum detection significance (SNR)"),
+    fits_path: Path = typer.Argument(
+        ..., help="Path to source results FITS file (e.g. isgri_mosa_res.fits, isgri_srcl_res.fits)"
+    ),
+    min_snr: float = typer.Option(
+        3.0, "--min-snr", "-s", help="Minimum detection significance (SNR)"
+    ),
 ):
     """Parse and print detected point sources with coordinates, flux, and detection SNR."""
     if not fits_path.exists():
@@ -107,20 +123,30 @@ def view_sources(
             src_table = None
             for h in hdul:
                 # Same astropy HDUList/HDU stub imprecision as in view_image() above.
-                if h.data is not None and getattr(h.data, "names", None) and any(n in h.data.names for n in ["NAME", "SOURCE_ID", "DETSIG", "SNR"]):  # pyright: ignore[reportAttributeAccessIssue]
+                if (
+                    h.data is not None  # pyright: ignore[reportAttributeAccessIssue]
+                    and getattr(h.data, "names", None)  # pyright: ignore[reportAttributeAccessIssue]
+                    and any(n in h.data.names for n in ["NAME", "SOURCE_ID", "DETSIG", "SNR"])  # pyright: ignore[reportAttributeAccessIssue]
+                ):
                     src_table = h
                     break
 
             if src_table is None:
-                console.print(f"[bold red]Error: No source catalog/results table found in {fits_path.name}.[/bold red]")
+                console.print(
+                    f"[bold red]Error: No source catalog/results table found in {fits_path.name}.[/bold red]"
+                )
                 raise typer.Exit(code=1)
 
             data = src_table.data  # pyright: ignore[reportAttributeAccessIssue]
             cols = data.names
 
-            name_col = "NAME" if "NAME" in cols else ("SOURCE_ID" if "SOURCE_ID" in cols else cols[0])
+            name_col = (
+                "NAME" if "NAME" in cols else ("SOURCE_ID" if "SOURCE_ID" in cols else cols[0])
+            )
             ra_col = "RA_OBJ" if "RA_OBJ" in cols else ("RA_FIN" if "RA_FIN" in cols else "RA")
-            dec_col = "DEC_OBJ" if "DEC_OBJ" in cols else ("DEC_FIN" if "DEC_FIN" in cols else "DEC")
+            dec_col = (
+                "DEC_OBJ" if "DEC_OBJ" in cols else ("DEC_FIN" if "DEC_FIN" in cols else "DEC")
+            )
             snr_col = "DETSIG" if "DETSIG" in cols else ("SNR" if "SNR" in cols else "SIGNIFICANCE")
             flux_col = "FLUX" if "FLUX" in cols else "COUNTS"
             flux_err_col = "FLUX_ERR" if "FLUX_ERR" in cols else None
@@ -146,7 +172,10 @@ def view_sources(
                     table.add_row(name, ra, dec, f"{snr:.1f}", flux_str)
 
             console.print(table)
-            console.print(f"[dim]Total: {count} sources detected with SNR ≥ {min_snr}σ (Table: {src_table.name})[/dim]")  # pyright: ignore[reportAttributeAccessIssue]
+            table_name = getattr(src_table, "name", "SOURCES")
+            console.print(
+                f"[dim]Total: {count} sources detected with SNR ≥ {min_snr}σ (Table: {table_name})[/dim]"
+            )
 
     except Exception as e:
         console.print(f"[bold red]Failed to view sources: {e}[/bold red]")
