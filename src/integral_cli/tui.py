@@ -218,11 +218,12 @@ class IntegralTUI(App):
                 with TabPane("Pipeline Output", id="tab_logs"):
                     yield RichLog(id="log", wrap=True, highlight=True, markup=True)
                 with TabPane("Detected Sources", id="tab_sources"):
-                    yield DataTable(id="sources_table")
+                    yield DataTable(id="sources_table", cursor_type="row", zebra_stripes=True)
                 with TabPane("Saved Log File", id="tab_saved_log"):
                     yield RichLog(id="saved_log_text", wrap=True, highlight=False, markup=False)
 
         yield Footer()
+
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "energy_preset":
