@@ -24,8 +24,12 @@ app = typer.Typer(
 app.add_typer(docker_app, name="docker", help="Manage & build Docker containers for local hardware")
 app.add_typer(data_app, name="data", help="Manage local observation data, imports, and downloads")
 app.add_typer(analysis_app, name="analyse", help="Execute science analysis pipelines (IBIS/JEM-X)")
-app.add_typer(view_app, name="view", help="Visualise and inspect FITS images, mosaics, and source lists")
-app.add_typer(benchmark_app, name="benchmark", help="Run performance benchmarks and multi-tier comparisons")
+app.add_typer(
+    view_app, name="view", help="Visualise and inspect FITS images, mosaics, and source lists"
+)
+app.add_typer(
+    benchmark_app, name="benchmark", help="Run performance benchmarks and multi-tier comparisons"
+)
 
 # Top level convenience commands
 app.command("status")(docker_status)
