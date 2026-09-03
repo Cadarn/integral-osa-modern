@@ -75,9 +75,10 @@ class IntegralTUI(App):
             self.call_from_thread(self._log, "[bold red]Error: ScW input is required.[/bold red]")
             return
 
-        argv = [sys.executable, "-m", "integral_cli.main", "analyse", instrument, scw_input]
+        argv = [sys.executable, "-m", "integral_cli.main", "analyse", instrument, scw_input, "--yes"]
         if workdir:
             argv += ["--workdir", workdir]
+
 
         self.call_from_thread(self._log, f"[bold cyan]$ {shlex.join(argv)}[/bold cyan]")
         self.call_from_thread(self._set_running, True)
