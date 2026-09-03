@@ -37,6 +37,7 @@ uv run integral view sources <fits-file>
 uv run integral benchmark <...>
 uv run integral docker build --arch auto
 uv run integral docker run
+uv run integral tui                    # interactive terminal UI for launching analyse runs
 
 # Lint / type-check (config in pyproject.toml; also run in CI, see below)
 uv run ruff check .
@@ -87,6 +88,11 @@ docker build --platform linux/amd64 -t integralsw/osa:11-modern-amd64 -f docker/
   `data_mgr.py`'s remote resolution.
 - `viewer.py` — FITS mosaic/image viewing (WCS rendering, ZScale) and source-list summaries.
 - `benchmark.py` — cross-architecture (native ARM64 vs emulated x86_64) timing comparisons.
+- `tui.py` — Textual TUI (`integral tui`) for configuring and launching `analyse` runs
+  interactively. Launches `python -m integral_cli.main analyse ...` as a subprocess (rather than
+  calling `analysis.py`'s functions in-process) so output streams live into a log widget with zero
+  changes to the existing execution path; runs in a `@work(thread=True)` worker so the UI stays
+  responsive, marshalling widget updates back via `call_from_thread`.
 
 `scripts/validate_science_products.py` (wired in as `integral validate`) and
 `scripts/fetch_integral_data.py` are standalone entry points also exposed via
