@@ -214,7 +214,33 @@ def run_ibis(
     workdir: Path = typer.Option(
         Path.cwd() / "work", "--workdir", "-w", help="Working directory for analysis"
     ),
-    og_name: str = typer.Option("obs_ibis", "--og", "-o", help="Observation group name"),
+    og_name: str = typer.Option(
+        "obs_ibis",
+        "--og",
+        "-o",
+        help="Observation group name (outputs written to work/obs/<og_name>)",
+    ),
+    isgri: bool = typer.Option(
+        True, "--isgri/--no-isgri", help="Enable ISGRI detector analysis (default: enabled)"
+    ),
+    picsit: bool = typer.Option(
+        False, "--picsit/--no-picsit", help="Enable PiCSIT detector analysis (default: disabled)"
+    ),
+    compton: bool = typer.Option(
+        False,
+        "--compton/--no-compton",
+        help="Enable Compton coincidence analysis (default: disabled)",
+    ),
+    clean_mode: int = typer.Option(
+        1,
+        "--clean-mode",
+        help="Ghost cleaning mode for deconvolution (OBS1_CleanMode: 0=None, 1=Standard/Ghost cleaning)",
+    ),
+    bright_threshold: float = typer.Option(
+        0.0001,
+        "--bright-threshold",
+        help="Bright PIF threshold for background calculation (brPifThreshold)",
+    ),
     mosaic: bool = typer.Option(
         True, "--mosaic/--no-mosaic", help="Run multi-ScW mosaicing stage (IMA2)"
     ),
@@ -280,12 +306,24 @@ def run_ibis(
     band_desc = f"{num_bands} band(s): " + ", ".join(
         f"{lo}-{hi} keV" for lo, hi in zip(min_bands.split(), max_bands.split())
     )
+    detectors = []
+
+    if isgri:
+        detectors.append("ISGRI")
+    if picsit:
+        detectors.append("PiCSIT")
+    if compton:
+        detectors.append("Compton")
+    det_desc = ", ".join(detectors) if detectors else "None"
+
     setup_panel = Panel(
-        f"[bold green]IBIS/ISGRI Science Reduction Setup[/bold green]\n\n"
+        f"[bold green]IBIS Science Reduction Setup[/bold green]\n\n"
         f"• ScW Count:       [cyan]{len(scws)} Science Windows[/cyan] ({scws[0]} ... {scws[-1]})\n"
+        f"• Detectors:       [cyan]{det_desc}[/cyan]\n"
         f"• Energy Bands:    [cyan]{band_desc}[/cyan]\n"
         f"• Analysis Level:  [cyan]startLevel={start_level} -> endLevel={end_level}[/cyan]\n"
         f"• Mosaicing (IMA2):[cyan]{'Enabled' if end_level == 'IMA2' else 'Single Pointing (IMA)'}[/cyan]\n"
+        f"• Output Directory:[cyan]{obs_dir}[/cyan]\n"
         f"• Workdir:         [cyan]{workdir}[/cyan]\n"
         f"• Data Archive:    [cyan]{config.rep_base_prod}[/cyan]\n"
         f"• Docker Image:    [cyan]{target_image}[/cyan]",
@@ -298,6 +336,10 @@ def run_ibis(
         if not proceed:
             console.print("[yellow]Analysis cancelled by user.[/yellow]")
             raise typer.Exit(code=0)
+
+    disable_isgri_str = "no" if isgri else "yes"
+    disable_picsit_str = "no" if picsit else "yes"
+    disable_compton_str = "no" if compton else "yes"
 
     bash_pipeline = f"""
     set -e
@@ -325,7 +367,7 @@ def run_ibis(
               baseDir="./" \
               obsDir="obs"
 
-    echo "=== 2. Running ibis_science_analysis ({band_desc}, endLevel={end_level}) ==="
+    echo "=== 2. Running ibis_science_analysis ({det_desc}, {band_desc}, endLevel={end_level}) ==="
     cd obs/{og_name}
 
     ibis_science_analysis \
@@ -334,14 +376,18 @@ def run_ibis(
         IBIS_II_ChanNum={num_bands} \
         IBIS_II_E_band_min="{min_bands}" \
         IBIS_II_E_band_max="{max_bands}" \
-
-        SWITCH_disableIsgri="no" \
-        SWITCH_disablePICsIT="yes" \
-        SWITCH_disableCompton="yes" \
+        SWITCH_disableIsgri="{disable_isgri_str}" \
+        SWITCH_disablePICsIT="{disable_picsit_str}" \
+        SWITCH_disableCompton="{disable_compton_str}" \
+        OBS1_CleanMode={clean_mode} \
+        brPifThreshold={bright_threshold} \
         CAT_refCat="{config.ref_catalog}[ISGRI_FLAG>0]" \
         brSrcDOL="{config.ref_catalog}[ISGRI_FLAG2==5&&ISGR_FLUX_1>100]" \
         IC_Group="/data/idx/ic/ic_master_file.fits[1]" \
         IC_Alias="OSA"
+
+    # Copy commonlog to observation group directory for archiving
+    cp -v /home/integral/commonlog.txt /home/integral/obs/{og_name}/{og_name}_run.log 2>/dev/null || true
     """
 
     start_time = time.perf_counter()

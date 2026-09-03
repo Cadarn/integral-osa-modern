@@ -2,7 +2,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from textual.widgets import Input
+from textual.widgets import Checkbox, Input
 
 from integral_cli.tui import IntegralTUI
 
@@ -24,13 +24,22 @@ async def test_composes_expected_widgets():
     async with app.run_test():
         assert app.query_one("#instrument") is not None
         assert app.query_one("#scw_input") is not None
+        assert app.query_one("#detector_mode") is not None
+        assert app.query_one("#og_name") is not None
         assert app.query_one("#energy_preset") is not None
         assert app.query_one("#custom_bands") is not None
         assert app.query_one("#product_level") is not None
         assert app.query_one("#workdir") is not None
+        assert app.query_one("#clean_mode") is not None
+        assert app.query_one("#bright_threshold") is not None
+        assert app.query_one("#clean_toggle") is not None
+        assert app.query_one("#status_label") is not None
+        assert app.query_one("#progress_bar") is not None
+        assert app.query_one("#result_banner") is not None
         assert app.query_one("#run") is not None
         assert app.query_one("#log") is not None
         assert app.query_one("#sources_table") is not None
+        assert app.query_one("#saved_log_text") is not None
 
 
 @pytest.mark.asyncio
@@ -49,7 +58,7 @@ async def test_energy_preset_custom_enables_input():
 @pytest.mark.asyncio
 async def test_run_without_scw_input_logs_error_and_never_launches_subprocess():
     app = IntegralTUI()
-    async with app.run_test(size=(100, 40)) as pilot:
+    async with app.run_test(size=(120, 50)) as pilot:
         with (
             patch.object(app, "_log") as mock_log,
             patch("integral_cli.tui.subprocess.Popen") as mock_popen,
@@ -60,18 +69,28 @@ async def test_run_without_scw_input_logs_error_and_never_launches_subprocess():
         mock_popen.assert_not_called()
         messages = [call.args[0] for call in mock_log.call_args_list]
         assert any("ScW input is required" in m for m in messages)
+        assert "error" in app.query_one("#result_banner").classes
 
 
 @pytest.mark.asyncio
-async def test_run_streams_subprocess_output_and_reports_success():
+async def test_run_streams_subprocess_output_updates_stage_and_reports_success():
     app = IntegralTUI()
-    async with app.run_test(size=(100, 40)) as pilot:
+    async with app.run_test(size=(120, 50)) as pilot:
         app.query_one("#scw_input", Input).value = "006000010010"
-        fake_proc = _FakeProcess(["line one", "line two"], returncode=0)
+        fake_proc = _FakeProcess(
+            [
+                "og_create started",
+                "Task ibis_science_analysis started",
+                "COR step running",
+                "IMA step running",
+                "Pipeline completed successfully",
+            ],
+            returncode=0,
+        )
 
         with (
             patch.object(app, "_log") as mock_log,
-            patch.object(app, "_populate_sources") as mock_populate,
+            patch.object(app, "_populate_sources", return_value=3) as mock_populate,
             patch("integral_cli.tui.subprocess.Popen", return_value=fake_proc) as mock_popen,
         ):
             await pilot.click("#run")
@@ -79,25 +98,31 @@ async def test_run_streams_subprocess_output_and_reports_success():
 
         argv = mock_popen.call_args.args[0]
         assert "analyse" in argv
-        assert "ibis" in argv  # default Select value
+        assert "ibis" in argv
         assert "006000010010" in argv
         assert "--yes" in argv
+        assert "--og" in argv
+        assert "obs_ibis" in argv
+        assert "--isgri" in argv
+        assert "--no-picsit" in argv
+        assert "--no-compton" in argv
         assert "--bands" in argv
         assert "18-60" in argv
         assert "--end-level" in argv
         assert "IMA2" in argv
 
         messages = [call.args[0] for call in mock_log.call_args_list]
-        assert any("line one" in m for m in messages)
-        assert any("line two" in m for m in messages)
+        assert any("COR step running" in m for m in messages)
         assert any("completed successfully" in m for m in messages)
         mock_populate.assert_called_once()
+        assert "success" in app.query_one("#result_banner").classes
+        assert "3 point source(s)" in str(app.query_one("#result_banner").render())
 
 
 @pytest.mark.asyncio
 async def test_run_reports_failure_on_nonzero_exit():
     app = IntegralTUI()
-    async with app.run_test(size=(100, 40)) as pilot:
+    async with app.run_test(size=(120, 50)) as pilot:
         app.query_one("#scw_input", Input).value = "006000010010"
         fake_proc = _FakeProcess(["something went wrong"], returncode=1)
 
@@ -110,22 +135,25 @@ async def test_run_reports_failure_on_nonzero_exit():
 
         messages = [call.args[0] for call in mock_log.call_args_list]
         assert any("Run failed" in m and "1" in m for m in messages)
+        assert "error" in app.query_one("#result_banner").classes
 
 
 @pytest.mark.asyncio
-async def test_workdir_and_custom_bands_passed_through_when_provided():
+async def test_detector_modes_and_advanced_settings_passed_to_argv():
     app = IntegralTUI()
-    async with app.run_test(size=(100, 40)) as pilot:
+    async with app.run_test(size=(120, 50)) as pilot:
         app.query_one("#scw_input", Input).value = "006000010010"
-        app.query_one("#workdir", Input).value = "/tmp/my-workdir"
-        app.query_one("#energy_preset").value = "custom"
-        app.query_one("#custom_bands", Input).value = "20-40, 40-100"
-        app.query_one("#product_level").value = "SPE"
+        app.query_one("#workdir", Input).value = "/tmp/custom-work"
+        app.query_one("#og_name", Input).value = "obs_myrun"
+        app.query_one("#detector_mode").value = "both"
+        app.query_one("#clean_mode").value = "0"
+        app.query_one("#bright_threshold", Input).value = "0.005"
+        app.query_one("#clean_toggle", Checkbox).value = False
         fake_proc = _FakeProcess([], returncode=0)
 
         with (
             patch.object(app, "_log"),
-            patch.object(app, "_populate_sources"),
+            patch.object(app, "_populate_sources", return_value=0),
             patch("integral_cli.tui.subprocess.Popen", return_value=fake_proc) as mock_popen,
         ):
             await pilot.click("#run")
@@ -133,11 +161,37 @@ async def test_workdir_and_custom_bands_passed_through_when_provided():
 
         argv = mock_popen.call_args.args[0]
         assert "--workdir" in argv
-        assert "/tmp/my-workdir" in argv
-        assert "--bands" in argv
-        assert "20-40, 40-100" in argv
-        assert "--end-level" in argv
-        assert "SPE" in argv
+        assert "/tmp/custom-work" in argv
+        assert "--og" in argv
+        assert "obs_myrun" in argv
+        assert "--isgri" in argv
+        assert "--picsit" in argv
+        assert "--no-compton" in argv
+        assert "--clean-mode" in argv
+        assert "0" in argv
+        assert "--bright-threshold" in argv
+        assert "0.005" in argv
+        assert "--no-clean" in argv
+
+
+@pytest.mark.asyncio
+async def test_saved_log_file_loads(tmp_path: Path):
+    from textual.widgets import TabbedContent
+
+    log_file = tmp_path / "commonlog.txt"
+    log_file.write_text("INTEGRAL Science Analysis commonlog entry 1\nentry 2\n")
+
+    app = IntegralTUI()
+    async with app.run_test(size=(120, 50)) as pilot:
+        tabs = app.query_one("#tabs", TabbedContent)
+        tabs.active = "tab_saved_log"
+        await pilot.pause()
+        app._load_saved_log(tmp_path, "obs_ibis")
+        await pilot.pause()
+        log_widget = app.query_one("#saved_log_text")
+        lines = [str(line.text) for line in log_widget.lines]
+        assert any("INTEGRAL Science Analysis commonlog entry 1" in l for l in lines)
+        assert any("entry 2" in l for l in lines)
 
 
 @pytest.mark.asyncio
@@ -146,7 +200,7 @@ async def test_populate_sources_parses_fits(tmp_path: Path):
     from astropy.io import fits
 
     # Create dummy isgri_mosa_res.fits
-    obs_dir = tmp_path / "obs" / "obs_ibis"
+    obs_dir = tmp_path / "obs" / "obs_custom"
     obs_dir.mkdir(parents=True)
     fits_file = obs_dir / "isgri_mosa_res.fits"
 
@@ -165,7 +219,8 @@ async def test_populate_sources_parses_fits(tmp_path: Path):
 
     app = IntegralTUI()
     async with app.run_test(size=(100, 40)):
-        app._populate_sources(tmp_path, "ibis")
+        count = app._populate_sources(tmp_path, "obs_custom")
+        assert count == 2
         table = app.query_one("#sources_table")
         assert table.row_count == 2
         row_0 = table.get_row_at(0)

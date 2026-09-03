@@ -6,6 +6,7 @@ functions in-process) so its output streams live into the log widget with zero
 changes to the existing, already-tested analysis/docker execution path.
 """
 
+import re
 import shlex
 import subprocess
 import sys
@@ -17,10 +18,13 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import (
     Button,
+    Checkbox,
+    Collapsible,
     DataTable,
     Footer,
     Header,
     Input,
+    ProgressBar,
     RichLog,
     Select,
     Static,
@@ -31,6 +35,12 @@ from textual.widgets import (
 from integral_cli.config import config
 
 INSTRUMENTS = ["ibis", "jemx", "omc", "spi"]
+DETECTOR_MODES = [
+    ("ISGRI only (15-1000 keV) [Default]", "isgri"),
+    ("PiCSIT only (175 keV - 10 MeV)", "picsit"),
+    ("Both ISGRI & PiCSIT", "both"),
+    ("Compton Mode (Coincidence)", "compton"),
+]
 ENERGY_PRESETS = [
     ("Standard: 18-60 keV (Single band)", "18-60"),
     ("Hard X-ray: 20-40, 40-100 keV (Two bands)", "20-40, 40-100"),
@@ -43,10 +53,28 @@ PRODUCT_LEVELS = [
     ("Pipeline up to Spectra (SPE)", "SPE"),
     ("Pipeline up to Lightcurves (LCR)", "LCR"),
 ]
+CLEAN_MODES = [
+    ("Standard ghost cleaning (OBS1_CleanMode=1) [Default]", "1"),
+    ("No ghost cleaning (OBS1_CleanMode=0)", "0"),
+]
+
+STAGE_PATTERNS = [
+    (r"og_create", "Initialising Observation Group", 10),
+    (r"Task ibis_science_analysis started", "Starting Pipeline", 20),
+    (r"COR", "COR: Energy Correction", 30),
+    (r"GTI", "GTI: Good Time Intervals", 40),
+    (r"DEAD", "DEAD: Deadtime Calculation", 50),
+    (r"BIN_I", "BIN_I: Shadowgram Binning", 60),
+    (r"BKG_I", "BKG_I: Background Subtraction", 70),
+    (r"CAT_I", "CAT_I: Catalog Matching", 80),
+    (r"IMA", "IMA: Image Reconstruction", 90),
+    (r"IMA2|mosaicing", "IMA2: Sky Mosaicing", 95),
+    (r"Pipeline completed", "Complete", 100),
+]
 
 
 class IntegralTUI(App):
-    """Enhanced form-based launcher for `integral analyse` with interactive parameters and product inspection."""
+    """Enhanced form-based launcher for `integral analyse` with progress tracking, log viewing, and product inspection."""
 
     CSS = """
     #form {
@@ -66,6 +94,36 @@ class IntegralTUI(App):
         height: auto;
         margin-right: 1;
     }
+    #progress_box {
+        height: auto;
+        margin-top: 1;
+        margin-bottom: 1;
+        padding: 1;
+        border: round $secondary;
+        background: $surface;
+    }
+    #status_label {
+        margin-bottom: 1;
+        text-style: bold;
+    }
+    #result_banner {
+        height: auto;
+        padding: 1;
+        margin-top: 1;
+        text-align: center;
+        text-style: bold;
+        display: none;
+    }
+    #result_banner.success {
+        display: block;
+        background: $success;
+        color: $text;
+    }
+    #result_banner.error {
+        display: block;
+        background: $error;
+        color: $text;
+    }
     #buttons {
         height: auto;
         margin-top: 1;
@@ -77,6 +135,10 @@ class IntegralTUI(App):
     DataTable {
         height: 100%;
     }
+    Collapsible {
+        margin-top: 1;
+        margin-bottom: 1;
+    }
     """
 
     BINDINGS: ClassVar = [("q", "quit", "Quit")]
@@ -85,6 +147,7 @@ class IntegralTUI(App):
         yield Header()
         with Vertical(id="form"):
             yield Static(f"Data archive: {config.rep_base_prod}  |  Image: {config.docker_image}")
+
             with Horizontal(classes="form-row"):
                 with Vertical(classes="form-col"):
                     yield Static("Instrument:", classes="label")
@@ -99,10 +162,18 @@ class IntegralTUI(App):
 
             with Horizontal(classes="form-row"):
                 with Vertical(classes="form-col"):
+                    yield Static("Detector Mode (IBIS):", classes="label")
+                    yield Select(DETECTOR_MODES, value="isgri", id="detector_mode")
+                with Vertical(classes="form-col"):
+                    yield Static("Observation Group Name:", classes="label")
+                    yield Input(placeholder="obs_ibis", value="obs_ibis", id="og_name")
+
+            with Horizontal(classes="form-row"):
+                with Vertical(classes="form-col"):
                     yield Static("Energy Band:", classes="label")
                     yield Select(ENERGY_PRESETS, value="18-60", id="energy_preset")
                 with Vertical(classes="form-col"):
-                    yield Static("Custom Band (if selected above):", classes="label")
+                    yield Static("Custom Band (if selected):", classes="label")
                     yield Input(placeholder="e.g. 20-40, 40-100", id="custom_bands", disabled=True)
 
             with Horizontal(classes="form-row"):
@@ -110,8 +181,27 @@ class IntegralTUI(App):
                     yield Static("Pipeline Product / Level:", classes="label")
                     yield Select(PRODUCT_LEVELS, value="IMA2", id="product_level")
                 with Vertical(classes="form-col"):
-                    yield Static("Working directory:", classes="label")
+                    yield Static("Working Directory:", classes="label")
                     yield Input(placeholder="Working directory (default: ./work)", id="workdir")
+
+            with Collapsible(title="Advanced Settings", collapsed=True, id="advanced_settings"):
+                with Horizontal(classes="form-row"):
+                    with Vertical(classes="form-col"):
+                        yield Static("Deconvolution Cleaning Mode:", classes="label")
+                        yield Select(CLEAN_MODES, value="1", id="clean_mode")
+                    with Vertical(classes="form-col"):
+                        yield Static("Bright PIF Threshold:", classes="label")
+                        yield Input(placeholder="0.0001", value="0.0001", id="bright_threshold")
+                yield Checkbox(
+                    "Clean previous observation group directory before run",
+                    value=True,
+                    id="clean_toggle",
+                )
+
+            with Vertical(id="progress_box"):
+                yield Static("Status: Ready to run", id="status_label")
+                yield ProgressBar(total=100, show_eta=False, id="progress_bar")
+                yield Static("", id="result_banner")
 
             with Horizontal(id="buttons"):
                 yield Button("Run Analysis", id="run", variant="success")
@@ -122,6 +212,8 @@ class IntegralTUI(App):
                 yield RichLog(id="log", wrap=True, highlight=True, markup=True)
             with TabPane("Detected Sources", id="tab_sources"):
                 yield DataTable(id="sources_table")
+            with TabPane("Saved Log File", id="tab_saved_log"):
+                yield RichLog(id="saved_log_text", wrap=True, highlight=False, markup=False)
 
         yield Footer()
 
@@ -145,8 +237,56 @@ class IntegralTUI(App):
 
     def _set_running(self, running: bool) -> None:
         self.query_one("#run", Button).disabled = running
+        if running:
+            banner = self.query_one("#result_banner", Static)
+            banner.classes = ""
+            banner.update("")
 
-    def _populate_sources(self, workdir: Path, instrument: str) -> None:
+    def _update_stage(self, stage_name: str, progress_val: int) -> None:
+        self.query_one("#status_label", Static).update(
+            f"Status: [bold cyan]{stage_name}[/bold cyan]"
+        )
+        self.query_one("#progress_bar", ProgressBar).update(progress=progress_val)
+
+    def _show_result_banner(self, success: bool, message: str) -> None:
+        banner = self.query_one("#result_banner", Static)
+        if success:
+            banner.classes = "success"
+            banner.update(f"✓ {message}")
+            self.query_one("#status_label", Static).update(
+                "Status: [bold green]Reduction Completed Successfully[/bold green]"
+            )
+            self.query_one("#progress_bar", ProgressBar).update(progress=100)
+        else:
+            banner.classes = "error"
+            banner.update(f"✗ {message}")
+            self.query_one("#status_label", Static).update(
+                "Status: [bold red]Pipeline Execution Failed[/bold red]"
+            )
+
+    def _load_saved_log(self, workdir: Path, og_name: str) -> None:
+        """Load commonlog.txt or og_run.log into the Saved Log File tab."""
+        log_candidates = [
+            workdir / "obs" / og_name / f"{og_name}_run.log",
+            workdir / "commonlog.txt",
+        ]
+        found = next((f for f in log_candidates if f.exists()), None)
+        if found:
+            log_widget = self.query_one("#saved_log_text", RichLog)
+            log_widget.clear()
+            log_widget.write(f"Log file: {found}\n" + "=" * 60)
+            try:
+                content = found.read_text(errors="replace")
+                lines = content.splitlines()
+                if len(lines) > 2000:
+                    log_widget.write(f"... truncated ({len(lines) - 2000} older lines omitted) ...")
+                    lines = lines[-2000:]
+                for line in lines:
+                    log_widget.write(line)
+            except Exception as e:
+                log_widget.write(f"Error reading log: {e}")
+
+    def _populate_sources(self, workdir: Path, og_name: str) -> int:
         """Scan workdir for mosaic or science source results and populate the DataTable."""
         table = self.query_one("#sources_table", DataTable)
         table.clear(columns=True)
@@ -154,14 +294,13 @@ class IntegralTUI(App):
             "Source Name", "RA (deg)", "Dec (deg)", "Significance (σ)", "Flux (cts/s)"
         )
 
-        # Candidate result files based on instrument
         cand_files = [
-            workdir / "obs" / f"obs_{instrument}" / "isgri_mosa_res.fits",
-            workdir / "obs" / f"obs_{instrument}" / "isgri_srcl_res.fits",
+            workdir / "obs" / og_name / "isgri_mosa_res.fits",
+            workdir / "obs" / og_name / "isgri_srcl_res.fits",
         ]
         found_file = next((f for f in cand_files if f.exists()), None)
         if not found_file:
-            return
+            return 0
 
         try:
             from astropy.io import fits
@@ -178,7 +317,7 @@ class IntegralTUI(App):
                         break
 
                 if not src_table:
-                    return
+                    return 0
 
                 data = src_table.data  # pyright: ignore[reportAttributeAccessIssue]
                 cols = data.names
@@ -195,7 +334,9 @@ class IntegralTUI(App):
                 flux_col = "FLUX" if "FLUX" in cols else "COUNTS"
                 flux_err_col = "FLUX_ERR" if "FLUX_ERR" in cols else None
 
+                count = 0
                 for row in data:
+                    count += 1
                     snr = float(row[snr_col]) if snr_col in cols else 0.0
                     name = str(row[name_col]).strip()
                     ra = f"{float(row[ra_col]):.4f}" if ra_col in cols else "N/A"
@@ -204,22 +345,30 @@ class IntegralTUI(App):
                     if flux_err_col and flux_err_col in cols:
                         flux_str += f" ± {float(row[flux_err_col]):.2f}"
                     table.add_row(name, ra, dec, f"{snr:.1f}", flux_str)
+                return count
         except Exception as e:
             self._log(
                 f"[dim yellow]Notice: Could not parse sources from {found_file.name}: {e}[/dim yellow]"
             )
+            return 0
 
     @work(thread=True, exclusive=True)
     def run_analysis(self) -> None:
         instrument = str(self.query_one("#instrument", Select).value)
         scw_input = self.query_one("#scw_input", Input).value.strip()
         workdir_str = self.query_one("#workdir", Input).value.strip()
+        og_name = self.query_one("#og_name", Input).value.strip() or "obs_ibis"
         energy_preset = str(self.query_one("#energy_preset", Select).value)
         custom_bands = self.query_one("#custom_bands", Input).value.strip()
         product_level = str(self.query_one("#product_level", Select).value)
+        detector_mode = str(self.query_one("#detector_mode", Select).value)
+        clean_mode = str(self.query_one("#clean_mode", Select).value)
+        bright_threshold = self.query_one("#bright_threshold", Input).value.strip() or "0.0001"
+        clean_toggle = self.query_one("#clean_toggle", Checkbox).value
 
         if not scw_input:
             self.call_from_thread(self._log, "[bold red]Error: ScW input is required.[/bold red]")
+            self.call_from_thread(self._show_result_banner, False, "ScW input is required.")
             return
 
         # Determine energy band specification
@@ -233,6 +382,8 @@ class IntegralTUI(App):
             instrument,
             scw_input,
             "--yes",
+            "--og",
+            og_name,
         ]
         if bands and bands != "custom":
             argv += ["--bands", bands]
@@ -241,32 +392,73 @@ class IntegralTUI(App):
         if workdir_str:
             argv += ["--workdir", workdir_str]
 
+        # Detector switches
+        if detector_mode == "isgri":
+            argv += ["--isgri", "--no-picsit", "--no-compton"]
+        elif detector_mode == "picsit":
+            argv += ["--no-isgri", "--picsit", "--no-compton"]
+        elif detector_mode == "both":
+            argv += ["--isgri", "--picsit", "--no-compton"]
+        elif detector_mode == "compton":
+            argv += ["--isgri", "--picsit", "--compton"]
+
+        argv += ["--clean-mode", clean_mode]
+        argv += ["--bright-threshold", bright_threshold]
+        argv += ["--clean" if clean_toggle else "--no-clean"]
+
         self.call_from_thread(self._log, f"[bold cyan]$ {shlex.join(argv)}[/bold cyan]")
         self.call_from_thread(self._set_running, True)
+        self.call_from_thread(self._update_stage, "Initializing Container & Observation Group", 10)
 
+        returncode = -1
         try:
             proc = subprocess.Popen(
                 argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
             )
             assert proc.stdout is not None
             for line in proc.stdout:
-                self.call_from_thread(self._log, line.rstrip())
+                line_str = line.rstrip()
+                self.call_from_thread(self._log, line_str)
+
+                # Inspect line for stage transitions
+                for pattern, stage_label, pct in STAGE_PATTERNS:
+                    if re.search(pattern, line_str):
+                        self.call_from_thread(self._update_stage, stage_label, pct)
+
             returncode = proc.wait()
         except Exception as e:
             self.call_from_thread(self._log, f"[bold red]Failed to launch run: {e}[/bold red]")
+            self.call_from_thread(self._show_result_banner, False, f"Failed to launch: {e}")
             return
         finally:
             self.call_from_thread(self._set_running, False)
 
+        actual_workdir = Path(workdir_str) if workdir_str else Path.cwd() / "work"
         if returncode == 0:
             self.call_from_thread(
                 self._log, "[bold green]✓ Run completed successfully.[/bold green]"
             )
-            actual_workdir = Path(workdir_str) if workdir_str else Path.cwd() / "work"
-            self.call_from_thread(self._populate_sources, actual_workdir, instrument)
+            # Count detected sources
+            source_count = self._populate_sources(actual_workdir, og_name)
+            self.call_from_thread(self._load_saved_log, actual_workdir, og_name)
+            self.call_from_thread(
+                self._show_result_banner,
+                True,
+                f"Run finished successfully! Found {source_count} point source(s). Results in obs/{og_name}",
+            )
+            if source_count > 0:
+
+                def switch_to_sources():
+                    self.query_one("#tabs", TabbedContent).active = "tab_sources"
+
+                self.call_from_thread(switch_to_sources)
         else:
             self.call_from_thread(
                 self._log, f"[bold red]✗ Run failed (exit code {returncode}).[/bold red]"
+            )
+            self.call_from_thread(self._load_saved_log, actual_workdir, og_name)
+            self.call_from_thread(
+                self._show_result_banner, False, f"Run failed with exit code {returncode}."
             )
 
 
