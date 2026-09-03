@@ -98,3 +98,43 @@ def test_revolution_spec_missing_directory_exits(tmp_path: Path, monkeypatch: py
     monkeypatch.setenv("REP_BASE_PROD", str(tmp_path))
     with pytest.raises(typer.Exit):
         _resolve_scw_ids("rev:0099")
+
+
+def test_parse_jemx_energy_channels_standard():
+    from integral_cli.analysis import parse_jemx_energy_channels
+
+    low, high, n = parse_jemx_energy_channels("3-10")
+    assert low == "46"
+    assert high == "82"
+    assert n == 1
+
+    low2, high2, n2 = parse_jemx_energy_channels("3-10, 10-25")
+    assert low2 == "46 129"
+    assert high2 == "128 223"
+    assert n2 == 2
+
+
+def test_validate_time_step_bounds():
+    from integral_cli.analysis import validate_time_step
+
+    # Positive standard steps succeed
+    validate_time_step(10.0, "standard")
+    validate_time_step(0.5, "standard")
+
+    # Non-positive steps fail
+    with pytest.raises(ValueError, match="strictly positive"):
+        validate_time_step(0.0, "standard")
+    with pytest.raises(ValueError, match="strictly positive"):
+        validate_time_step(-5.0, "standard")
+
+    # Too small standard step fails
+    with pytest.raises(ValueError, match="too fine"):
+        validate_time_step(0.01, "standard")
+
+    # Fine PIF step succeeds
+    validate_time_step(0.005, "pif")
+    validate_time_step(0.0001, "pif")
+
+    # Sub-microsecond step fails even in PIF mode
+    with pytest.raises(ValueError, match="cannot be smaller"):
+        validate_time_step(0.000001, "pif")

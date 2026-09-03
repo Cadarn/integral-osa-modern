@@ -167,11 +167,17 @@ class SourceDetailModal(ModalScreen[None]):
 
 
 INSTRUMENTS = [
-    ("IBIS / ISGRI & PiCSIT (Hard X-ray / Gamma-ray)", "ibis"),
-    ("JEM-X (Joint European X-ray Monitor)", "jemx"),
+    ("IBIS (Imager)", "ibis"),
+    ("SPI (Spectrometer)", "spi"),
+    ("JEM-X (X-ray Monitor)", "jemx"),
     ("OMC (Optical Monitoring Camera)", "omc"),
-    ("SPI (Spectrometer on INTEGRAL)", "spi"),
 ]
+
+TIMING_MODES = [
+    ("Standard Lightcurve (time bin >= 0.1s)", "standard"),
+    ("Fast / Pulsar Timing (PIF-based mode)", "pif"),
+]
+
 
 INSTRUMENT_ENERGY_PRESETS = {
     "ibis": [
@@ -466,6 +472,14 @@ class IntegralTUI(App):
                 yield Static("Pipeline Product / Level:", classes="field-label")
                 yield Select(INSTRUMENT_PRODUCT_LEVELS["ibis"], value="IMA2", id="product_level")
 
+                with Vertical(id="timing_settings_box", classes="hidden"):
+                    yield Static("Timing Analysis Mode:", classes="field-label")
+                    yield Select(TIMING_MODES, value="standard", id="timing_mode")
+                    yield Static(
+                        "Time Bin / Step (seconds):", id="time_step_label", classes="field-label"
+                    )
+                    yield Input(placeholder="e.g. 10.0", value="10.0", id="time_step")
+
                 yield Static("Working Directory:", classes="field-label")
                 yield Input(placeholder="Working directory (default: ./work)", id="workdir")
 
@@ -548,6 +562,42 @@ class IntegralTUI(App):
             prod_levels = INSTRUMENT_PRODUCT_LEVELS.get(inst, INSTRUMENT_PRODUCT_LEVELS["ibis"])
             prod_select.set_options(prod_levels)
             prod_select.value = prod_levels[0][1]
+
+        elif event.select.id == "product_level":
+            # Dynamic visibility for timing controls when LCR level is chosen
+            timing_box = next(iter(self.query("#timing_settings_box")), None)
+            if timing_box:
+                if event.value == "LCR":
+                    timing_box.remove_class("hidden")
+                    # Set sensible default for current instrument
+                    inst = str(self.query_one("#instrument", Select).value)
+                    time_step_input = self.query_one("#time_step", Input)
+                    if not time_step_input.value or time_step_input.value in [
+                        "10.0",
+                        "4.0",
+                        "0.01",
+                    ]:
+                        time_step_input.value = "4.0" if inst == "jemx" else "10.0"
+                else:
+                    timing_box.add_class("hidden")
+
+        elif event.select.id == "timing_mode":
+            time_inputs = list(self.query("#time_step"))
+            labels = list(self.query("#time_step_label"))
+            if time_inputs and labels:
+                t_input = self.query_one("#time_step", Input)
+                t_label = self.query_one("#time_step_label", Static)
+
+                if event.value == "pif":
+                    t_label.update("High-Res Time Bin (seconds, PIF mode):")
+                    t_input.placeholder = "e.g. 0.001 (1ms) or 0.01"
+                    if t_input.value in ["10.0", "4.0"]:
+                        t_input.value = "0.005"
+                else:
+                    t_label.update("Time Bin / Step (seconds):")
+                    t_input.placeholder = "e.g. 10.0"
+                    if t_input.value in ["0.005", "0.001"]:
+                        t_input.value = "10.0"
 
         elif event.select.id == "energy_preset":
             custom_input = next(iter(self.query("#custom_bands")), None)
@@ -800,11 +850,40 @@ class IntegralTUI(App):
         elif instrument == "jemx":
             jemx_unit = str(self.query_one("#jemx_unit", Select).value)
             argv += ["--unit", jemx_unit]
+            if bands and bands != "custom":
+                argv += ["--bands", bands]
             if product_level:
                 argv += ["--end-level", product_level]
         elif instrument in ["omc", "spi"]:
             if product_level:
                 argv += ["--end-level", product_level]
+
+        # Timing analysis parameters (when product_level == LCR)
+        if product_level == "LCR":
+            timing_mode = str(self.query_one("#timing_mode", Select).value)
+            time_step_str = self.query_one("#time_step", Input).value.strip() or "10.0"
+            try:
+                t_step = float(time_step_str)
+                if t_step <= 0:
+                    raise ValueError("Time step must be strictly positive (> 0).")
+                if timing_mode == "standard" and t_step < 0.05:
+                    raise ValueError(
+                        f"Standard timing step ({t_step}s) too small (< 0.05s). Switch to 'Fast / Pulsar Timing (PIF)' mode for fine sub-second bins."
+                    )
+                if timing_mode == "pif" and t_step < 0.00001:
+                    raise ValueError(
+                        f"PIF timing step ({t_step}s) cannot be smaller than 0.00001s."
+                    )
+            except ValueError as err:
+                self.call_from_thread(
+                    self._log, f"[bold red]Timing Parameter Error: {err}[/bold red]"
+                )
+                self.call_from_thread(self._show_result_banner, False, str(err))
+                return
+
+            argv += ["--time-step", str(t_step)]
+            if instrument == "ibis":
+                argv += ["--timing-mode", timing_mode]
 
         if workdir_str:
             argv += ["--workdir", workdir_str]

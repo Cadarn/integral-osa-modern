@@ -78,6 +78,90 @@ def parse_energy_bands(band_spec: str) -> tuple[str, str, int]:
     return " ".join(_fmt(x) for x in mins), " ".join(_fmt(x) for x in maxs), len(mins)
 
 
+def parse_jemx_energy_channels(band_spec: str) -> tuple[str, str, int]:
+    """Convert JEM-X energy band specifications (in keV) to JEM-X channel bounds.
+
+    Standard JEM-X calibration maps ~3 keV -> channel 46 and ~35 keV -> channel 255.
+    Approximate formula: channel = round((E_keV - 0.0) * (256 - 1) / 35.0) clamped to [0, 255].
+    Common OSA standard channel boundaries:
+      3-10 keV  -> chan 46 to 128
+      10-25 keV -> chan 129 to 223
+      3-25 keV (two bands) -> low: "46 129", high: "128 223"
+      3-35 keV  -> chan 46 to 255
+
+    Returns (chan_low_str, chan_high_str, n_bins).
+    """
+    parts = [p.strip() for p in band_spec.replace(";", ",").split(",") if p.strip()]
+    if not parts:
+        raise ValueError("JEM-X energy band specification cannot be empty.")
+
+    canon = {
+        "3-10": ("46", "82", 1),
+        "10-25": ("83", "159", 1),
+        "3-25": ("46 129", "128 223", 2),
+        "3-10,10-25": ("46 129", "128 223", 2),
+        "3-35": ("46", "223", 1),
+    }
+    clean_key = ",".join(parts).replace(" ", "")
+    if clean_key in canon:
+        return canon[clean_key]
+
+    def _kev_to_chan(e_kev: float) -> int:
+        chan = round(e_kev * 6.4)  # ~6.4 channels per keV
+        return max(0, min(255, chan))
+
+    chan_low: list[int] = []
+    chan_high: list[int] = []
+
+    for part in parts:
+        if "-" in part:
+            lo_str, hi_str = part.split("-", 1)
+        elif " " in part.strip():
+            tokens = part.strip().split()
+            if len(tokens) != 2:
+                raise ValueError(f"Cannot parse JEM-X band '{part}'. Use 'Emin-Emax'.")
+            lo_str, hi_str = tokens[0], tokens[1]
+        else:
+            raise ValueError(
+                f"Invalid JEM-X band '{part}'. Expected 'Emin-Emax' in keV (e.g. 3-10)."
+            )
+
+        try:
+            lo_k = float(lo_str.strip())
+            hi_k = float(hi_str.strip())
+        except ValueError as err:
+            raise ValueError(f"Non-numeric energy boundary in '{part}': {err}") from err
+
+        if lo_k >= hi_k:
+            raise ValueError(
+                f"Lower bound ({lo_k} keV) must be less than upper bound ({hi_k} keV)."
+            )
+
+        c_lo = _kev_to_chan(lo_k)
+        c_hi = _kev_to_chan(hi_k)
+        if c_lo >= c_hi:
+            c_hi = c_lo + 1
+        chan_low.append(c_lo)
+        chan_high.append(c_hi)
+
+    return " ".join(str(c) for c in chan_low), " ".join(str(c) for c in chan_high), len(chan_low)
+
+
+def validate_time_step(time_step: float, timing_mode: str = "standard") -> None:
+    """Validate lightcurve time step parameter (seconds)."""
+    if time_step <= 0:
+        raise ValueError(f"Time step / bin size must be strictly positive (> 0), got {time_step}s.")
+    if timing_mode == "standard" and time_step < 0.05:
+        raise ValueError(
+            f"Standard lightcurve mode time step ({time_step}s) is too fine (< 0.05s) and will cause "
+            "extreme memory/runtime overhead. Use '--timing-mode pif' for high-resolution timing."
+        )
+    if timing_mode == "pif" and time_step < 0.00001:
+        raise ValueError(
+            f"PIF timing step ({time_step}s) cannot be smaller than 10 microseconds (0.00001s)."
+        )
+
+
 def _resolve_scw_ids(scw_input: str) -> list[str]:
     """Resolve a revolution spec, scw.list path, comma-separated list, or bare ScW ID into IDs."""
     if scw_input.startswith("rev:"):
@@ -241,6 +325,16 @@ def run_ibis(
         "--bright-threshold",
         help="Bright PIF threshold for background calculation (brPifThreshold)",
     ),
+    time_step: float = typer.Option(
+        10.0,
+        "--time-step",
+        help="Lightcurve time step / bin size in seconds (IBIS_II_lcr_timeStep, default: 10.0s)",
+    ),
+    timing_mode: str = typer.Option(
+        "standard",
+        "--timing-mode",
+        help="Timing analysis mode: 'standard' (regular lightcurve) or 'pif' (pixel illumination fraction / fast pulsar timing)",
+    ),
     mosaic: bool = typer.Option(
         True, "--mosaic/--no-mosaic", help="Run multi-ScW mosaicing stage (IMA2)"
     ),
@@ -337,9 +431,17 @@ def run_ibis(
             console.print("[yellow]Analysis cancelled by user.[/yellow]")
             raise typer.Exit(code=0)
 
+    validate_time_step(time_step, timing_mode)
+
     disable_isgri_str = "no" if isgri else "yes"
     disable_picsit_str = "no" if picsit else "yes"
     disable_compton_str = "no" if compton else "yes"
+
+    # High-resolution PIF mode configurations for fast/pulsar timing
+    pif_flags = ""
+    if timing_mode == "pif":
+        # Enable detailed pixel illumination calculation for fine time-resolved lightcurves
+        pif_flags = f"ILCR_delta_t={time_step} OBS1_SearchMode=1"
 
     bash_pipeline = f"""
     set -e
@@ -376,15 +478,18 @@ def run_ibis(
         IBIS_II_ChanNum={num_bands} \
         IBIS_II_E_band_min="{min_bands}" \
         IBIS_II_E_band_max="{max_bands}" \
+        IBIS_II_lcr_timeStep={time_step} \
         SWITCH_disableIsgri="{disable_isgri_str}" \
         SWITCH_disablePICsIT="{disable_picsit_str}" \
         SWITCH_disableCompton="{disable_compton_str}" \
         OBS1_CleanMode={clean_mode} \
         brPifThreshold={bright_threshold} \
+        {pif_flags} \
         CAT_refCat="{config.ref_catalog}[ISGRI_FLAG>0]" \
         brSrcDOL="{config.ref_catalog}[ISGRI_FLAG2==5&&ISGR_FLUX_1>100]" \
         IC_Group="/data/idx/ic/ic_master_file.fits[1]" \
         IC_Alias="OSA"
+
 
     # Copy commonlog to observation group directory for archiving
     cp -v /home/integral/commonlog.txt /home/integral/obs/{og_name}/{og_name}_run.log 2>/dev/null || true
@@ -416,6 +521,17 @@ def run_jemx(
         help="Science Window ID (e.g. 006000010010), comma-separated list, or revolution (e.g. 'rev:0060:5')",
     ),
     jemx_unit: int = typer.Option(1, "--unit", "-u", help="JEM-X unit number (1 or 2, default: 1)"),
+    energy_bands: str | None = typer.Option(
+        None,
+        "--bands",
+        "-b",
+        help="Energy band specification in keV: e.g. '3-10', '10-25', or '3-10, 10-25' (converted to JEM-X channels).",
+    ),
+    time_step: float = typer.Option(
+        4.0,
+        "--time-step",
+        help="Lightcurve time bin size in seconds (LCR_timeStep, default: 4.0s)",
+    ),
     start_level: str = typer.Option(
         "COR", "--start-level", help="Start level (COR, DEAD, BIN_I, IMA, IMA2)"
     ),
@@ -430,6 +546,17 @@ def run_jemx(
     ),
 ):
     """Run JEM-X science analysis pipeline (j_science_analysis) with native ARM64 container."""
+    validate_time_step(time_step, timing_mode="standard")
+
+    # Resolve JEM-X energy channels
+    if energy_bands:
+        chan_low, chan_high, num_chan_bins = parse_jemx_energy_channels(energy_bands)
+    else:
+        # Standard default 4-channel binning across 3-35 keV
+        chan_low = "46 83 129 160"
+        chan_high = "82 128 159 223"
+        num_chan_bins = 4
+
     workdir.mkdir(parents=True, exist_ok=True)
     scw_file = workdir / "scw.list"
     obs_dir = workdir / "obs" / og_name
@@ -449,6 +576,8 @@ def run_jemx(
             f"[bold green]Starting JEM-X {jemx_unit} Science Reduction[/bold green]\n\n"
             f"• ScW Count:       [cyan]{len(scws)} Science Windows[/cyan]\n"
             f"• Instrument:      [cyan]JEM-X {jemx_unit}[/cyan]\n"
+            f"• Energy Channels: [cyan]chanLow='{chan_low}' chanHigh='{chan_high}' ({num_chan_bins} bins)[/cyan]\n"
+            f"• Time Step (LCR): [cyan]{time_step}s[/cyan]\n"
             f"• Analysis Level:  [cyan]startLevel={start_level} -> endLevel={end_level}[/cyan]\n"
             f"• Workdir:         [cyan]{workdir}[/cyan]\n"
             f"• Docker Image:    [cyan]{target_image}[/cyan]",
@@ -487,11 +616,11 @@ def run_jemx(
         jemxNum="{jemx_unit}" \
         startLevel="{start_level}" \
         endLevel="{end_level}" \
-        nChanBins=4 \
-        chanLow="46 83 129 160" \
-        chanHigh="82 128 159 223" \
+        nChanBins={num_chan_bins} \
+        chanLow="{chan_low}" \
+        chanHigh="{chan_high}" \
         CAT_I_usrCat="" \
-        LCR_timeStep=4.0 \
+        LCR_timeStep={time_step} \
         IC_Group="/data/idx/ic/ic_master_file.fits[1]" \
         IC_Alias="OSA"
 

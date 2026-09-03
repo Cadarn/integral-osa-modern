@@ -330,3 +330,34 @@ async def test_dynamic_instrument_switching():
         assert og_input.value == "obs_spi"
         assert energy_sel.value == "20-40"
         assert prod_sel.value == "SPIROS"
+
+
+@pytest.mark.asyncio
+async def test_dynamic_timing_settings_box():
+    from textual.widgets import Select
+
+    app = IntegralTUI()
+    async with app.run_test(size=(140, 42)) as pilot:
+        prod_sel = app.query_one("#product_level", Select)
+        timing_box = app.query_one("#timing_settings_box")
+        time_step_input = app.query_one("#time_step", Input)
+        timing_mode_sel = app.query_one("#timing_mode", Select)
+
+        # Initially hidden (default product_level is IMA2)
+        assert timing_box.has_class("hidden")
+
+        # Selecting LCR displays timing settings box
+        prod_sel.value = "LCR"
+        await pilot.pause()
+        assert not timing_box.has_class("hidden")
+        assert time_step_input.value == "10.0"
+
+        # Switching timing mode to PIF changes defaults
+        timing_mode_sel.value = "pif"
+        await pilot.pause()
+        assert float(time_step_input.value) <= 0.05
+
+        # Selecting IMA hides timing box again
+        prod_sel.value = "IMA"
+        await pilot.pause()
+        assert timing_box.has_class("hidden")
