@@ -59,8 +59,8 @@ RUN for f in $(find /src/osa -name 'config.guess'); do \
         cp -f /usr/share/misc/config.sub "$f"; \
     done
 
-# Patch 2: Add -fallow-argument-mismatch, -finit-local-zero, -fcommon and enable -fdefault-integer-8 for aarch64
-RUN sed -i 's/-Wcharacter-truncation/-Wcharacter-truncation -fallow-argument-mismatch -finit-local-zero/g' \
+# Patch 2: Add -fallow-argument-mismatch, -finit-local-zero, -fmax-stack-var-size=32768, -fcommon and enable aarch64
+RUN sed -i 's/-Wcharacter-truncation/-Wcharacter-truncation -fallow-argument-mismatch -finit-local-zero -fmax-stack-var-size=32768/g' \
         /src/osa/support-sw/makefiles/ac_stuff/configure.in \
         /src/osa/support-sw/makefiles/ac_stuff/configure && \
     sed -i 's/CFLAGS="-g"/CFLAGS="-g -fcommon"/g' \
@@ -72,6 +72,7 @@ RUN sed -i 's/-Wcharacter-truncation/-Wcharacter-truncation -fallow-argument-mis
     sed -i 's/test "${build_cpu}" = "x86_64"/test "${build_cpu}" = "x86_64" -o "${build_cpu}" = "aarch64"/g' \
         /src/osa/support-sw/makefiles/ac_stuff/configure.in \
         /src/osa/support-sw/makefiles/ac_stuff/configure
+
 
 
 
@@ -111,7 +112,15 @@ RUN sed -i '/procName = '\''CleanStaInit'\''/a \ \ nullify(distance, pomx, pomy,
     sed -i '/procName = '\''DeconInit'\''/a \ \ nullify(CWORK, GP, GM, workp, workm, work, M, GPMP, GMMM)' \
         /src/osa/analysis-sw/ibis/ii_skyimage/ii_skyimage_declean.f90 && \
     sed -i '/iw = 0/a \ \ nullify(filter, snr)' \
-        /src/osa/analysis-sw/ibis/ii_skyimage/ii_skyimage_deconlib.f90
+        /src/osa/analysis-sw/ibis/ii_skyimage/ii_skyimage_deconlib.f90 && \
+    sed -i 's/ActiveScwArray = 1/!ActiveScwArray = 1/g' \
+        /src/osa/analysis-sw/ibis/ii_skyimage/ii_skyimage_control.f90 && \
+    sed -i '/call message(procname,'\'' Will not be treated'\'',0,Status)/a \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ Status = ISDC_OK' \
+        /src/osa/analysis-sw/ibis/ii_skyimage/ii_skyimage_control.f90 && \
+    sed -i 's/Real(KIND=4)  ,dimension(idim2,jdim2) :: filltab/Real(KIND=4) :: filltab/g' \
+        /src/osa/analysis-sw/ibis/ii_skyimage/ii_skyimage_atti.f90
+
+
 
 # Patch 9: JEM-X isnan() integer argument compatibility & SPI spigti multiple definition
 RUN sed -i 's/isnan( \*(trigBuffer+iSort) )/isnan( (double)\*(trigBuffer+iSort) )/g' \
