@@ -275,3 +275,58 @@ async def test_browse_scw_modal_applies_selection(tmp_path: Path):
 
             scw_val = app.query_one("#scw_input", Input).value
             assert "004200010010" in scw_val
+
+
+@pytest.mark.asyncio
+async def test_dynamic_instrument_switching():
+    from textual.widgets import Select, Static
+
+    app = IntegralTUI()
+    async with app.run_test(size=(140, 42)) as pilot:
+        inst_sel = app.query_one("#instrument", Select)
+        energy_sel = app.query_one("#energy_preset", Select)
+        prod_sel = app.query_one("#product_level", Select)
+        det_box = app.query_one("#detector_mode_box")
+        jemx_box = app.query_one("#jemx_unit_box")
+        cleaning_box = app.query_one("#ibis_cleaning_box")
+        og_input = app.query_one("#og_name", Input)
+        energy_label = app.query_one("#energy_label", Static)
+
+        # 1. IBIS defaults
+        assert not det_box.has_class("hidden")
+        assert jemx_box.has_class("hidden")
+        assert not cleaning_box.has_class("hidden")
+        assert og_input.value == "obs_ibis"
+        assert energy_sel.value == "18-60"
+        assert prod_sel.value == "IMA2"
+
+        # 2. Switch to JEM-X
+        inst_sel.value = "jemx"
+        await pilot.pause()
+        assert det_box.has_class("hidden")
+        assert not jemx_box.has_class("hidden")
+        assert cleaning_box.has_class("hidden")
+        assert og_input.value == "obs_jemx"
+        assert energy_sel.value == "3-10"
+        assert prod_sel.value == "IMA2"
+
+        # 3. Switch to OMC
+        inst_sel.value = "omc"
+        await pilot.pause()
+        assert det_box.has_class("hidden")
+        assert jemx_box.has_class("hidden")
+        assert cleaning_box.has_class("hidden")
+        assert og_input.value == "obs_omc"
+        assert "Optical Filter" in str(energy_label.render())
+        assert energy_sel.value == "V-filter"
+        assert prod_sel.value == "IMA"
+
+        # 4. Switch to SPI
+        inst_sel.value = "spi"
+        await pilot.pause()
+        assert det_box.has_class("hidden")
+        assert jemx_box.has_class("hidden")
+        assert cleaning_box.has_class("hidden")
+        assert og_input.value == "obs_spi"
+        assert energy_sel.value == "20-40"
+        assert prod_sel.value == "SPIROS"

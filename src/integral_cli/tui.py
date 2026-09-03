@@ -166,43 +166,122 @@ class SourceDetailModal(ModalScreen[None]):
             self.dismiss()
 
 
-INSTRUMENTS = ["ibis", "jemx", "omc", "spi"]
+INSTRUMENTS = [
+    ("IBIS / ISGRI & PiCSIT (Hard X-ray / Gamma-ray)", "ibis"),
+    ("JEM-X (Joint European X-ray Monitor)", "jemx"),
+    ("OMC (Optical Monitoring Camera)", "omc"),
+    ("SPI (Spectrometer on INTEGRAL)", "spi"),
+]
+
+INSTRUMENT_ENERGY_PRESETS = {
+    "ibis": [
+        ("Standard: 18-60 keV (Single band)", "18-60"),
+        ("Hard X-ray: 20-40, 40-100 keV (Two bands)", "20-40, 40-100"),
+        ("Broadband: 20-100 keV (Single band)", "20-100"),
+        ("Custom energy band...", "custom"),
+    ],
+    "jemx": [
+        ("Standard: 3-10 keV (Single band)", "3-10"),
+        ("Medium: 10-25 keV (Single band)", "10-25"),
+        ("Full range: 3-25 keV (Two bands: 3-10, 10-25)", "3-10, 10-25"),
+        ("Broadband: 3-35 keV", "3-35"),
+        ("Custom energy band...", "custom"),
+    ],
+    "omc": [
+        ("V-filter standard (500-600 nm)", "V-filter"),
+        ("Custom optical filter / window...", "custom"),
+    ],
+    "spi": [
+        ("Standard continuum: 20-40 keV", "20-40"),
+        ("Positron line: 505-517 keV", "505-517"),
+        ("High-energy: 40-1000 keV", "40-1000"),
+        ("Custom energy band...", "custom"),
+    ],
+}
+
+INSTRUMENT_PRODUCT_LEVELS = {
+    "ibis": [
+        ("Sky Images & Mosaic (IMA2) [Default]", "IMA2"),
+        ("Single Pointing Sky Images (IMA)", "IMA"),
+        ("Pipeline up to Spectra (SPE)", "SPE"),
+        ("Pipeline up to Lightcurves (LCR)", "LCR"),
+    ],
+    "jemx": [
+        ("Sky Images & Mosaic (IMA2) [Default]", "IMA2"),
+        ("Single Pointing Sky Images (IMA)", "IMA"),
+        ("Pipeline up to Spectra (SPE)", "SPE"),
+        ("Pipeline up to Lightcurves (LCR)", "LCR"),
+    ],
+    "omc": [
+        ("Photometry & Source Extraction (IMA) [Default]", "IMA"),
+        ("Flux Correction only (COR)", "COR"),
+    ],
+    "spi": [
+        ("SPIROS Image & Spectral Deconvolution [Default]", "SPIROS"),
+        ("SPIMODFIT Maximum Likelihood Fitting", "SPIMODFIT"),
+        ("Background Modeling (BKG)", "BKG"),
+        ("Pointing & Energy Correction (POINT)", "POINT"),
+    ],
+}
+
 DETECTOR_MODES = [
     ("ISGRI only (15-1000 keV) [Default]", "isgri"),
     ("PiCSIT only (175 keV - 10 MeV)", "picsit"),
     ("Both ISGRI & PiCSIT", "both"),
     ("Compton Mode (Coincidence)", "compton"),
 ]
-ENERGY_PRESETS = [
-    ("Standard: 18-60 keV (Single band)", "18-60"),
-    ("Hard X-ray: 20-40, 40-100 keV (Two bands)", "20-40, 40-100"),
-    ("Broadband: 20-100 keV (Single band)", "20-100"),
-    ("Custom energy band...", "custom"),
+
+JEMX_UNITS = [
+    ("JEM-X Unit 1 (Default)", "1"),
+    ("JEM-X Unit 2", "2"),
 ]
-PRODUCT_LEVELS = [
-    ("Sky Images & Mosaic (IMA2) [Default]", "IMA2"),
-    ("Single Pointing Sky Images (IMA)", "IMA"),
-    ("Pipeline up to Spectra (SPE)", "SPE"),
-    ("Pipeline up to Lightcurves (LCR)", "LCR"),
-]
+
 CLEAN_MODES = [
     ("Standard ghost cleaning (OBS1_CleanMode=1) [Default]", "1"),
     ("No ghost cleaning (OBS1_CleanMode=0)", "0"),
 ]
 
-STAGE_PATTERNS = [
-    (r"og_create", "Initialising Observation Group", 10),
-    (r"Task ibis_science_analysis started", "Starting Pipeline", 20),
-    (r"COR", "COR: Energy Correction", 30),
-    (r"GTI", "GTI: Good Time Intervals", 40),
-    (r"DEAD", "DEAD: Deadtime Calculation", 50),
-    (r"BIN_I", "BIN_I: Shadowgram Binning", 60),
-    (r"BKG_I", "BKG_I: Background Subtraction", 70),
-    (r"CAT_I", "CAT_I: Catalog Matching", 80),
-    (r"IMA", "IMA: Image Reconstruction", 90),
-    (r"IMA2|mosaicing", "IMA2: Sky Mosaicing", 95),
-    (r"Pipeline completed", "Complete", 100),
-]
+INSTRUMENT_STAGE_PATTERNS = {
+    "ibis": [
+        (r"og_create", "Initialising Observation Group", 10),
+        (r"Task ibis_science_analysis started", "Starting Pipeline", 20),
+        (r"COR", "COR: Energy Correction", 30),
+        (r"GTI", "GTI: Good Time Intervals", 40),
+        (r"DEAD", "DEAD: Deadtime Calculation", 50),
+        (r"BIN_I", "BIN_I: Shadowgram Binning", 60),
+        (r"BKG_I", "BKG_I: Background Subtraction", 70),
+        (r"CAT_I", "CAT_I: Catalog Matching", 80),
+        (r"IMA", "IMA: Image Reconstruction", 90),
+        (r"IMA2|mosaicing", "IMA2: Sky Mosaicing", 95),
+        (r"Pipeline completed", "Complete", 100),
+    ],
+    "jemx": [
+        (r"og_create", "Initialising JEM-X Group", 10),
+        (r"jemx_science_analysis started", "Starting Pipeline", 20),
+        (r"COR", "COR: Calibration & Correction", 35),
+        (r"DEAD", "DEAD: Deadtime Calculation", 50),
+        (r"BIN_I", "BIN_I: Shadowgram Binning", 65),
+        (r"IMA", "IMA: Sky Reconstruction", 80),
+        (r"IMA2", "IMA2: Mosaic Formation", 95),
+        (r"Pipeline completed", "Complete", 100),
+    ],
+    "omc": [
+        (r"og_create", "Initialising OMC Group", 15),
+        (r"omc_science_analysis", "Running OMC Pipeline", 35),
+        (r"COR", "COR: Dark Current & Flat Fielding", 60),
+        (r"IMA", "IMA: Photometry Extraction", 90),
+        (r"Pipeline completed", "Complete", 100),
+    ],
+    "spi": [
+        (r"og_create", "Initialising SPI Group", 15),
+        (r"spi_science_analysis", "Running SPI Pipeline", 30),
+        (r"COR", "COR: Energy Calibration", 45),
+        (r"DEAD|POINT", "DEAD/POINT: Gaps & Pointing", 60),
+        (r"BKG", "BKG: Background Model Fitting", 75),
+        (r"SPIROS|SPIMODFIT", "SPIROS: Deconvolution / Fitting", 90),
+        (r"Pipeline completed", "Complete", 100),
+    ],
+}
 
 
 class IntegralTUI(App):
@@ -229,7 +308,11 @@ class IntegralTUI(App):
         margin-top: 1;
         text-style: bold;
     }
+    .hidden {
+        display: none;
+    }
     .scw-input-row {
+
         height: auto;
         margin-bottom: 1;
     }
@@ -347,7 +430,7 @@ class IntegralTUI(App):
                     yield Button("Quit", id="quit", variant="error")
 
                 yield Static("Instrument:", classes="field-label")
-                yield Select([(i.upper(), i) for i in INSTRUMENTS], value="ibis", id="instrument")
+                yield Select(INSTRUMENTS, value="ibis", id="instrument")
 
                 yield Static("Science Windows:", classes="field-label")
                 with Horizontal(classes="scw-input-row"):
@@ -356,29 +439,42 @@ class IntegralTUI(App):
                     )
                     yield Button("Browse", id="btn_browse_scw", variant="default")
 
-                yield Static("Detector Mode (IBIS):", classes="field-label")
-                yield Select(DETECTOR_MODES, value="isgri", id="detector_mode")
+                with Vertical(id="detector_mode_box"):
+                    yield Static("Detector Mode (IBIS):", classes="field-label")
+                    yield Select(DETECTOR_MODES, value="isgri", id="detector_mode")
+
+                with Vertical(id="jemx_unit_box", classes="hidden"):
+                    yield Static("JEM-X Sensor Unit:", classes="field-label")
+                    yield Select(JEMX_UNITS, value="1", id="jemx_unit")
 
                 yield Static("Observation Group Name:", classes="field-label")
                 yield Input(placeholder="obs_ibis", value="obs_ibis", id="og_name")
 
-                yield Static("Energy Band:", classes="field-label")
-                yield Select(ENERGY_PRESETS, value="18-60", id="energy_preset")
+                with Vertical(id="energy_box"):
+                    yield Static("Energy Band / Filter:", id="energy_label", classes="field-label")
+                    yield Select(
+                        INSTRUMENT_ENERGY_PRESETS["ibis"], value="18-60", id="energy_preset"
+                    )
 
-                yield Static("Custom Band (if selected above):", classes="field-label")
-                yield Input(placeholder="e.g. 20-40, 40-100", id="custom_bands", disabled=True)
+                    yield Static(
+                        "Custom Band (if selected above):",
+                        id="custom_bands_label",
+                        classes="field-label",
+                    )
+                    yield Input(placeholder="e.g. 20-40, 40-100", id="custom_bands", disabled=True)
 
                 yield Static("Pipeline Product / Level:", classes="field-label")
-                yield Select(PRODUCT_LEVELS, value="IMA2", id="product_level")
+                yield Select(INSTRUMENT_PRODUCT_LEVELS["ibis"], value="IMA2", id="product_level")
 
                 yield Static("Working Directory:", classes="field-label")
                 yield Input(placeholder="Working directory (default: ./work)", id="workdir")
 
                 with Collapsible(title="Advanced Settings", collapsed=True, id="advanced_settings"):
-                    yield Static("Deconvolution Cleaning Mode:", classes="field-label")
-                    yield Select(CLEAN_MODES, value="1", id="clean_mode")
-                    yield Static("Bright PIF Threshold:", classes="field-label")
-                    yield Input(placeholder="0.0001", value="0.0001", id="bright_threshold")
+                    with Vertical(id="ibis_cleaning_box"):
+                        yield Static("Deconvolution Cleaning Mode:", classes="field-label")
+                        yield Select(CLEAN_MODES, value="1", id="clean_mode")
+                        yield Static("Bright PIF Threshold:", classes="field-label")
+                        yield Input(placeholder="0.0001", value="0.0001", id="bright_threshold")
                     yield Checkbox(
                         "Clean previous observation group directory before run",
                         value=True,
@@ -402,14 +498,65 @@ class IntegralTUI(App):
         )
 
     def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "instrument":
+            inst = str(event.value)
 
-        if event.select.id == "energy_preset":
-            custom_input = self.query_one("#custom_bands", Input)
-            if event.value == "custom":
-                custom_input.disabled = False
-                custom_input.focus()
+            # Update OG name placeholder and value if default
+            og_input = self.query_one("#og_name", Input)
+            if og_input.value in ["obs_ibis", "obs_jemx", "obs_omc", "obs_spi"]:
+                og_input.value = f"obs_{inst}"
+            og_input.placeholder = f"obs_{inst}"
+
+            # Dynamic visibility for detector mode (IBIS only)
+            det_box = self.query_one("#detector_mode_box")
+            if inst == "ibis":
+                det_box.remove_class("hidden")
             else:
-                custom_input.disabled = True
+                det_box.add_class("hidden")
+
+            # Dynamic visibility for JEM-X unit
+            jemx_box = self.query_one("#jemx_unit_box")
+            if inst == "jemx":
+                jemx_box.remove_class("hidden")
+            else:
+                jemx_box.add_class("hidden")
+
+            # Dynamic visibility for IBIS deconvolution cleaning
+            clean_box = self.query_one("#ibis_cleaning_box")
+            if inst == "ibis":
+                clean_box.remove_class("hidden")
+            else:
+                clean_box.add_class("hidden")
+
+            # Update Energy Band / Filter options
+            energy_select = self.query_one("#energy_preset", Select)
+            energy_label = self.query_one("#energy_label", Static)
+            custom_label = self.query_one("#custom_bands_label", Static)
+            if inst == "omc":
+                energy_label.update("Optical Filter:")
+                custom_label.update("Custom Filter (if selected above):")
+            else:
+                energy_label.update("Energy Band:")
+                custom_label.update("Custom Band (if selected above):")
+
+            energy_presets = INSTRUMENT_ENERGY_PRESETS.get(inst, INSTRUMENT_ENERGY_PRESETS["ibis"])
+            energy_select.set_options(energy_presets)
+            energy_select.value = energy_presets[0][1]
+
+            # Update Product / Level options
+            prod_select = self.query_one("#product_level", Select)
+            prod_levels = INSTRUMENT_PRODUCT_LEVELS.get(inst, INSTRUMENT_PRODUCT_LEVELS["ibis"])
+            prod_select.set_options(prod_levels)
+            prod_select.value = prod_levels[0][1]
+
+        elif event.select.id == "energy_preset":
+            custom_input = next(iter(self.query("#custom_bands")), None)
+            if custom_input:
+                if event.value == "custom":
+                    custom_input.disabled = False
+                    custom_input.focus()
+                else:
+                    custom_input.disabled = True
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "run":
@@ -535,8 +682,19 @@ class IntegralTUI(App):
         cand_files = [
             workdir / "obs" / og_name / "isgri_mosa_res.fits",
             workdir / "obs" / og_name / "isgri_srcl_res.fits",
+            workdir / "obs" / og_name / "jmx1_mosa_res.fits",
+            workdir / "obs" / og_name / "jmx2_mosa_res.fits",
+            workdir / "obs" / og_name / "jmx1_srcl_res.fits",
+            workdir / "obs" / og_name / "jmx2_srcl_res.fits",
+            workdir / "obs" / og_name / "omc_srcl_res.fits",
+            workdir / "obs" / og_name / "spi_srcl_res.fits",
         ]
         found_file = next((f for f in cand_files if f.exists()), None)
+        if not found_file:
+            # Check for any mosaic or source results in og_name
+            found_file = next(
+                (f for f in (workdir / "obs" / og_name).glob("*res*.fits") if f.is_file()), None
+            )
         if not found_file:
             return 0
 
@@ -619,34 +777,46 @@ class IntegralTUI(App):
             "analyse",
             instrument,
             scw_input,
-            "--yes",
             "--og",
             og_name,
         ]
-        if bands and bands != "custom":
-            argv += ["--bands", bands]
-        if product_level:
-            argv += ["--end-level", product_level]
+
+        if instrument == "ibis":
+            argv.append("--yes")
+            if bands and bands != "custom":
+                argv += ["--bands", bands]
+            if product_level:
+                argv += ["--end-level", product_level]
+            if detector_mode == "isgri":
+                argv += ["--isgri", "--no-picsit", "--no-compton"]
+            elif detector_mode == "picsit":
+                argv += ["--no-isgri", "--picsit", "--no-compton"]
+            elif detector_mode == "both":
+                argv += ["--isgri", "--picsit", "--no-compton"]
+            elif detector_mode == "compton":
+                argv += ["--isgri", "--picsit", "--compton"]
+            argv += ["--clean-mode", clean_mode]
+            argv += ["--bright-threshold", bright_threshold]
+        elif instrument == "jemx":
+            jemx_unit = str(self.query_one("#jemx_unit", Select).value)
+            argv += ["--unit", jemx_unit]
+            if product_level:
+                argv += ["--end-level", product_level]
+        elif instrument in ["omc", "spi"]:
+            if product_level:
+                argv += ["--end-level", product_level]
+
         if workdir_str:
             argv += ["--workdir", workdir_str]
-
-        # Detector switches
-        if detector_mode == "isgri":
-            argv += ["--isgri", "--no-picsit", "--no-compton"]
-        elif detector_mode == "picsit":
-            argv += ["--no-isgri", "--picsit", "--no-compton"]
-        elif detector_mode == "both":
-            argv += ["--isgri", "--picsit", "--no-compton"]
-        elif detector_mode == "compton":
-            argv += ["--isgri", "--picsit", "--compton"]
-
-        argv += ["--clean-mode", clean_mode]
-        argv += ["--bright-threshold", bright_threshold]
         argv += ["--clean" if clean_toggle else "--no-clean"]
 
         self.call_from_thread(self._log, f"[bold cyan]$ {shlex.join(argv)}[/bold cyan]")
         self.call_from_thread(self._set_running, True)
         self.call_from_thread(self._update_stage, "Initializing Container & Observation Group", 10)
+
+        stage_patterns = INSTRUMENT_STAGE_PATTERNS.get(
+            instrument, INSTRUMENT_STAGE_PATTERNS["ibis"]
+        )
 
         start_time = time.monotonic()
         last_elapsed_update = start_time
@@ -667,7 +837,7 @@ class IntegralTUI(App):
                     self.call_from_thread(self._update_elapsed, elapsed_secs)
 
                 # Inspect line for stage transitions
-                for pattern, stage_label, pct in STAGE_PATTERNS:
+                for pattern, stage_label, pct in stage_patterns:
                     if re.search(pattern, line_str):
                         self.call_from_thread(self._update_stage, stage_label, pct)
 

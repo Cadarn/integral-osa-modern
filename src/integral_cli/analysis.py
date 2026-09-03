@@ -495,8 +495,8 @@ def run_jemx(
         IC_Group="/data/idx/ic/ic_master_file.fits[1]" \
         IC_Alias="OSA"
 
-
-
+    # Copy commonlog to observation group directory for archiving
+    cp -v /home/integral/commonlog.txt /home/integral/obs/{og_name}/{og_name}_run.log 2>/dev/null || true
     """
 
     start_time = time.perf_counter()
@@ -575,6 +575,9 @@ def run_omc(
         endLevel="{end_level}" \
         IC_Group="/data/idx/ic/ic_master_file.fits[1]" \
         IC_Alias="OSA"
+
+    # Copy commonlog to observation group directory for archiving
+    cp -v /home/integral/commonlog.txt /home/integral/obs/{og_name}/{og_name}_run.log 2>/dev/null || true
     """
 
     start_time = time.perf_counter()
@@ -656,6 +659,9 @@ def run_spi(
         endLevel="{end_level}" \
         IC_Group="/data/idx/ic/ic_master_file.fits[1]" \
         IC_Alias="OSA"
+
+    # Copy commonlog to observation group directory for archiving
+    cp -v /home/integral/commonlog.txt /home/integral/obs/{og_name}/{og_name}_run.log 2>/dev/null || true
     """
 
     start_time = time.perf_counter()
