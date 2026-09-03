@@ -2,7 +2,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from textual.widgets import Checkbox, Input
+from textual.widgets import Checkbox, DataTable, Input
 
 from integral_cli.tui import IntegralTUI
 
@@ -227,3 +227,51 @@ async def test_populate_sources_parses_fits(tmp_path: Path):
         assert row_0[0] == "TEST_SRC_1"
         assert row_0[3] == "15.5"
         assert "42.00 ± 1.20" in row_0[4]
+
+
+@pytest.mark.asyncio
+async def test_source_detail_modal_opens_on_row_selected():
+    from integral_cli.tui import SourceDetailModal
+
+    app = IntegralTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        table = app.query_one("#sources_table", DataTable)
+        table.add_row("Cyg X-1", "299.59", "35.20", "88.4", "120.5 ± 2.1")
+        table.action_select_cursor()
+        await pilot.pause()
+
+        assert len(app.screen_stack) == 2
+        assert isinstance(app.screen, SourceDetailModal)
+        assert app.screen.source_row[0] == "Cyg X-1"
+
+        modal = app.screen
+        modal.dismiss()
+        await pilot.pause()
+        assert len(app.screen_stack) == 1
+
+
+@pytest.mark.asyncio
+async def test_browse_scw_modal_applies_selection(tmp_path: Path):
+    from integral_cli.tui import ScwBrowseModal
+
+    # Setup fake local archive
+    scw_dir = tmp_path / "scw" / "0042" / "004200010010.001"
+    scw_dir.mkdir(parents=True)
+
+    app = IntegralTUI()
+    with patch.dict("os.environ", {"REP_BASE_PROD": str(tmp_path)}):
+        async with app.run_test(size=(120, 40)) as pilot:
+            btn = app.query_one("#btn_browse_scw")
+            btn.scroll_visible()
+            await pilot.pause()
+            await pilot.click("#btn_browse_scw")
+            await pilot.pause()
+
+            assert len(app.screen_stack) == 2
+            assert isinstance(app.screen, ScwBrowseModal)
+
+            await pilot.click("#browse_apply")
+            await pilot.pause()
+
+            scw_val = app.query_one("#scw_input", Input).value
+            assert "004200010010" in scw_val

@@ -10,12 +10,14 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import ClassVar
 
 from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
     Checkbox,
@@ -24,15 +26,145 @@ from textual.widgets import (
     Footer,
     Header,
     Input,
+    Label,
     ProgressBar,
     RichLog,
     Select,
+    SelectionList,
+    Sparkline,
     Static,
     TabbedContent,
     TabPane,
 )
 
 from integral_cli.config import config
+
+
+class ScwBrowseModal(ModalScreen[list[str] | None]):
+    """Modal allowing visual discovery and multi-selection of Science Windows from local archive."""
+
+    DEFAULT_CSS = """
+    ScwBrowseModal {
+        align: center middle;
+    }
+    #browse_modal_box {
+        width: 72;
+        height: 26;
+        padding: 1 2;
+        border: thick $accent;
+        background: $surface;
+    }
+    #browse_title {
+        text-style: bold;
+        color: $accent;
+        margin-bottom: 1;
+        border-bottom: solid $accent;
+    }
+    SelectionList {
+        height: 1fr;
+        margin: 1 0;
+        border: solid $primary;
+    }
+    #browse_buttons {
+        height: auto;
+        margin-top: 1;
+    }
+    """
+
+    def __init__(self, scw_options: list[tuple[str, str]]) -> None:
+        super().__init__()
+        self.scw_options = scw_options
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="browse_modal_box"):
+            yield Label("Browse Archive: Select Science Windows", id="browse_title")
+            yield SelectionList[str](
+                *[(label, scw_id, True) for label, scw_id in self.scw_options],
+                id="scw_selection_list",
+            )
+            with Horizontal(id="browse_buttons"):
+                yield Button("Apply Selection", id="browse_apply", variant="success")
+                yield Button("Cancel", id="browse_cancel", variant="error")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "browse_apply":
+            selected = list(self.query_one("#scw_selection_list", SelectionList).selected)
+            self.dismiss(selected)
+        elif event.button.id == "browse_cancel":
+            self.dismiss(None)
+
+
+class SourceDetailModal(ModalScreen[None]):
+    """Modal displaying deep-dive astronomical telemetry for a selected detected source."""
+
+    DEFAULT_CSS = """
+    SourceDetailModal {
+        align: center middle;
+    }
+    #source_modal_box {
+        width: 64;
+        height: auto;
+        padding: 1 2;
+        border: thick $accent;
+        background: $surface;
+    }
+    #modal_title {
+        text-style: bold;
+        color: $accent;
+        margin-bottom: 1;
+        border-bottom: solid $accent;
+    }
+    .modal-row {
+        height: auto;
+        margin-bottom: 1;
+    }
+    .modal-label {
+        width: 22;
+        text-style: bold;
+    }
+    .modal-val {
+        width: 1fr;
+        color: $text;
+    }
+    #modal_close {
+        margin-top: 1;
+        width: 100%;
+    }
+    """
+
+    def __init__(self, source_row: list[str]) -> None:
+        super().__init__()
+        self.source_row = source_row
+
+    def compose(self) -> ComposeResult:
+        name, ra, dec, snr, flux = (
+            self.source_row
+            if len(self.source_row) >= 5
+            else ["Unknown", "N/A", "N/A", "N/A", "N/A"]
+        )
+        with Vertical(id="source_modal_box"):
+            yield Label(f"Source Telemetry: {name}", id="modal_title")
+            with Horizontal(classes="modal-row"):
+                yield Label("Source Name:", classes="modal-label")
+                yield Label(f"[bold]{name}[/bold]", classes="modal-val")
+            with Horizontal(classes="modal-row"):
+                yield Label("Right Ascension (RA):", classes="modal-label")
+                yield Label(f"{ra}°", classes="modal-val")
+            with Horizontal(classes="modal-row"):
+                yield Label("Declination (Dec):", classes="modal-label")
+                yield Label(f"{dec}°", classes="modal-val")
+            with Horizontal(classes="modal-row"):
+                yield Label("Detection Significance:", classes="modal-label")
+                yield Label(f"[bold green]{snr} σ[/bold green]", classes="modal-val")
+            with Horizontal(classes="modal-row"):
+                yield Label("Mosaic Flux Rate:", classes="modal-label")
+                yield Label(f"{flux} cts/s", classes="modal-val")
+            yield Button("Close Details (Esc)", id="modal_close", variant="primary")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "modal_close":
+            self.dismiss()
+
 
 INSTRUMENTS = ["ibis", "jemx", "omc", "spi"]
 DETECTOR_MODES = [
@@ -97,7 +229,21 @@ class IntegralTUI(App):
         margin-top: 1;
         text-style: bold;
     }
+    .scw-input-row {
+        height: auto;
+        margin-bottom: 1;
+    }
+    #scw_input {
+        width: 1fr;
+        margin-bottom: 0;
+    }
+    #btn_browse_scw {
+        width: auto;
+        min-width: 10;
+        margin-left: 1;
+    }
     #progress_box {
+
         height: auto;
         margin-top: 1;
         margin-bottom: 1;
@@ -108,6 +254,23 @@ class IntegralTUI(App):
     #status_label {
         margin-bottom: 1;
         text-style: bold;
+    }
+    #elapsed_time {
+        margin-top: 1;
+        color: $accent;
+        text-style: bold;
+    }
+    #spark_box {
+        height: auto;
+        margin-top: 1;
+    }
+    .metrics-sublabel {
+        color: $text-muted;
+    }
+    #spark_activity {
+        width: 100%;
+        height: 2;
+        color: $accent;
     }
     #result_banner {
         height: auto;
@@ -173,6 +336,10 @@ class IntegralTUI(App):
                 with Vertical(id="progress_box"):
                     yield Static("Status: Ready to run", id="status_label")
                     yield ProgressBar(total=100, show_eta=False, id="progress_bar")
+                    yield Static("Elapsed Time: --:--", id="elapsed_time")
+                    with Vertical(id="spark_box"):
+                        yield Static("Activity Telemetry:", classes="metrics-sublabel")
+                        yield Sparkline(data=[0, 0, 0, 0, 0], id="spark_activity")
                     yield Static("", id="result_banner")
 
                 with Horizontal(id="buttons"):
@@ -183,7 +350,11 @@ class IntegralTUI(App):
                 yield Select([(i.upper(), i) for i in INSTRUMENTS], value="ibis", id="instrument")
 
                 yield Static("Science Windows:", classes="field-label")
-                yield Input(placeholder="e.g. rev:0060:5, 006000010010, scw.list", id="scw_input")
+                with Horizontal(classes="scw-input-row"):
+                    yield Input(
+                        placeholder="e.g. rev:0060:5, 006000010010, scw.list", id="scw_input"
+                    )
+                    yield Button("Browse", id="btn_browse_scw", variant="default")
 
                 yield Static("Detector Mode (IBIS):", classes="field-label")
                 yield Select(DETECTOR_MODES, value="isgri", id="detector_mode")
@@ -224,8 +395,14 @@ class IntegralTUI(App):
 
         yield Footer()
 
+    def on_mount(self) -> None:
+        table = self.query_one("#sources_table", DataTable)
+        table.add_columns(
+            "Source Name", "RA (deg)", "Dec (deg)", "Significance (σ)", "Flux (cts/s)"
+        )
 
     def on_select_changed(self, event: Select.Changed) -> None:
+
         if event.select.id == "energy_preset":
             custom_input = self.query_one("#custom_bands", Input)
             if event.value == "custom":
@@ -239,6 +416,47 @@ class IntegralTUI(App):
             self.run_analysis()
         elif event.button.id == "quit":
             self.exit()
+        elif event.button.id == "btn_browse_scw":
+            self._browse_archive_scws()
+
+    def _browse_archive_scws(self) -> None:
+        scw_dir = Path(config.rep_base_prod) / "scw"
+        scw_options: list[tuple[str, str]] = []
+        if scw_dir.exists():
+            for rev_dir in sorted(scw_dir.iterdir()):
+                if rev_dir.is_dir() and not rev_dir.name.startswith("."):
+                    rev_id = rev_dir.name
+                    for item in sorted(rev_dir.iterdir()):
+                        if item.is_dir() and item.name.startswith(rev_id):
+                            raw_id = item.name.split(".")[0]
+                            is_pointing = raw_id.endswith("0010")
+                            label = (
+                                f"Rev {rev_id} | {raw_id} ({'Pointing' if is_pointing else 'Slew'})"
+                            )
+                            if (label, raw_id) not in scw_options:
+                                scw_options.append((label, raw_id))
+
+        if not scw_options:
+            self._log(
+                "[dim yellow]No Science Windows discovered in local archive directory.[/dim yellow]"
+            )
+            return
+
+        def _on_browse_selected(selected_scws: list[str] | None) -> None:
+            if selected_scws:
+                scw_str = ", ".join(selected_scws)
+                self.query_one("#scw_input", Input).value = scw_str
+                self._log(
+                    f"[bold cyan]Selected {len(selected_scws)} ScWs from archive: {scw_str}[/bold cyan]"
+                )
+
+        self.push_screen(ScwBrowseModal(scw_options), _on_browse_selected)
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+
+        table = self.query_one("#sources_table", DataTable)
+        row_data = [str(cell) for cell in table.get_row(event.row_key)]
+        self.push_screen(SourceDetailModal(row_data))
 
     def _log(self, message: str) -> None:
         self.query_one("#log", RichLog).write(message)
@@ -249,12 +467,24 @@ class IntegralTUI(App):
             banner = self.query_one("#result_banner", Static)
             banner.classes = ""
             banner.update("")
+            self.query_one("#elapsed_time", Static).update("Elapsed Time: 00:00")
+            self.query_one("#spark_activity", Sparkline).data = [0, 5]
 
     def _update_stage(self, stage_name: str, progress_val: int) -> None:
         self.query_one("#status_label", Static).update(
             f"Status: [bold cyan]{stage_name}[/bold cyan]"
         )
         self.query_one("#progress_bar", ProgressBar).update(progress=progress_val)
+        spark = self.query_one("#spark_activity", Sparkline)
+        current_data = list(spark.data) if spark.data else [0]
+        current_data.append(progress_val)
+        if len(current_data) > 15:
+            current_data = current_data[-15:]
+        spark.data = current_data
+
+    def _update_elapsed(self, seconds: int) -> None:
+        mins, secs = divmod(seconds, 60)
+        self.query_one("#elapsed_time", Static).update(f"Elapsed Time: {mins:02d}:{secs:02d}")
 
     def _show_result_banner(self, success: bool, message: str) -> None:
         banner = self.query_one("#result_banner", Static)
@@ -418,6 +648,8 @@ class IntegralTUI(App):
         self.call_from_thread(self._set_running, True)
         self.call_from_thread(self._update_stage, "Initializing Container & Observation Group", 10)
 
+        start_time = time.monotonic()
+        last_elapsed_update = start_time
         returncode = -1
         try:
             proc = subprocess.Popen(
@@ -428,12 +660,20 @@ class IntegralTUI(App):
                 line_str = line.rstrip()
                 self.call_from_thread(self._log, line_str)
 
+                now = time.monotonic()
+                if now - last_elapsed_update >= 1.0:
+                    last_elapsed_update = now
+                    elapsed_secs = int(now - start_time)
+                    self.call_from_thread(self._update_elapsed, elapsed_secs)
+
                 # Inspect line for stage transitions
                 for pattern, stage_label, pct in STAGE_PATTERNS:
                     if re.search(pattern, line_str):
                         self.call_from_thread(self._update_stage, stage_label, pct)
 
             returncode = proc.wait()
+            total_secs = int(time.monotonic() - start_time)
+            self.call_from_thread(self._update_elapsed, total_secs)
         except Exception as e:
             self.call_from_thread(self._log, f"[bold red]Failed to launch run: {e}[/bold red]")
             self.call_from_thread(self._show_result_banner, False, f"Failed to launch: {e}")
@@ -450,14 +690,19 @@ class IntegralTUI(App):
             def update_results():
                 source_count = self._populate_sources(actual_workdir, og_name)
                 self._load_saved_log(actual_workdir, og_name)
+                tabs = self.query_one("#tabs", TabbedContent)
+                tab_sources = tabs.get_tab("tab_sources")
+                if tab_sources:
+                    tab_sources.label = f"Detected Sources ({source_count})"
                 self._show_result_banner(
                     True,
                     f"Run finished successfully! Found {source_count} point source(s). Results in obs/{og_name}",
                 )
                 if source_count > 0:
-                    self.query_one("#tabs", TabbedContent).active = "tab_sources"
+                    tabs.active = "tab_sources"
 
             self.call_from_thread(update_results)
+
         else:
             self.call_from_thread(
                 self._log, f"[bold red]✗ Run failed (exit code {returncode}).[/bold red]"
