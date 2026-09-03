@@ -2,7 +2,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from textual.widgets import Checkbox, DataTable, Input
+from textual.widgets import Button, Checkbox, DataTable, Input
 
 from integral_cli.tui import IntegralTUI
 
@@ -361,3 +361,37 @@ async def test_dynamic_timing_settings_box():
         prod_sel.value = "IMA"
         await pilot.pause()
         assert timing_box.has_class("hidden")
+
+
+@pytest.mark.asyncio
+async def test_sidebar_collapse_and_toggle():
+    app = IntegralTUI()
+    async with app.run_test(size=(140, 42)) as pilot:
+        sidebar = app.query_one("#sidebar")
+        toggle_btn = app.query_one("#btn_toggle_sidebar", Button)
+
+        # 1. Initially expanded
+        assert not sidebar.has_class("collapsed")
+        assert toggle_btn.label == "[⮜ Hide Config]"
+
+        # 2. Click manual toggle button -> collapses sidebar
+        await pilot.click("#btn_toggle_sidebar")
+        assert sidebar.has_class("collapsed")
+        assert toggle_btn.label == "[⮞ Show Config]"
+
+        # 3. Press hotkey 'c' -> expands sidebar back
+        await pilot.press("c")
+        assert not sidebar.has_class("collapsed")
+        assert toggle_btn.label == "[⮜ Hide Config]"
+
+        # 4. Starting analysis automatically collapses sidebar
+        app._set_running(True)
+        await pilot.pause()
+        assert sidebar.has_class("collapsed")
+        assert toggle_btn.label == "[⮞ Show Config]"
+
+        # 5. Completing analysis automatically restores sidebar
+        app._set_running(False)
+        await pilot.pause()
+        assert not sidebar.has_class("collapsed")
+        assert toggle_btn.label == "[⮜ Hide Config]"

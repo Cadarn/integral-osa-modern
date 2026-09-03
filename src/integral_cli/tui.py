@@ -17,6 +17,7 @@ from typing import ClassVar
 from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
@@ -307,6 +308,9 @@ class IntegralTUI(App):
         border-right: heavy $accent;
         padding: 0 1;
     }
+    #sidebar.collapsed {
+        display: none;
+    }
     #form_columns {
         height: auto;
     }
@@ -355,6 +359,14 @@ class IntegralTUI(App):
     #status_label {
         width: 1fr;
         text-style: bold;
+    }
+    #btn_toggle_sidebar {
+        width: auto;
+        height: 1;
+        min-width: 15;
+        margin: 0 1;
+        padding: 0 1;
+        border: none;
     }
     #elapsed_time {
         width: auto;
@@ -424,7 +436,10 @@ class IntegralTUI(App):
     }
     """
 
-    BINDINGS: ClassVar = [("q", "quit", "Quit")]
+    BINDINGS: ClassVar = [
+        ("q", "quit", "Quit"),
+        ("c", "toggle_sidebar", "Toggle Config"),
+    ]
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -522,6 +537,7 @@ class IntegralTUI(App):
                 with Vertical(id="progress_box"):
                     with Horizontal(id="progress_row"):
                         yield Static("Status: Ready to run", id="status_label")
+                        yield Button("[⮜ Hide Config]", id="btn_toggle_sidebar", variant="default")
                         yield Static("Elapsed Time: --:--", id="elapsed_time")
                     yield ProgressBar(total=100, show_eta=False, id="progress_bar")
                     with Vertical(id="spark_box"):
@@ -648,6 +664,19 @@ class IntegralTUI(App):
                     if custom_box:
                         custom_box.add_class("hidden")
 
+    def action_toggle_sidebar(self) -> None:
+        """Toggle sidebar visibility."""
+        sidebar = self.query_one("#sidebar", VerticalScroll)
+        sidebar.toggle_class("collapsed")
+        try:
+            btn = self.query_one("#btn_toggle_sidebar", Button)
+            if "collapsed" in sidebar.classes:
+                btn.label = "[⮞ Show Config]"
+            else:
+                btn.label = "[⮜ Hide Config]"
+        except NoMatches:
+            return
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "run":
             self.run_analysis()
@@ -655,6 +684,8 @@ class IntegralTUI(App):
             self.exit()
         elif event.button.id == "btn_browse_scw":
             self._browse_archive_scws()
+        elif event.button.id == "btn_toggle_sidebar":
+            self.action_toggle_sidebar()
 
     def _browse_archive_scws(self) -> None:
         scw_dir = Path(config.rep_base_prod) / "scw"
@@ -700,12 +731,25 @@ class IntegralTUI(App):
 
     def _set_running(self, running: bool) -> None:
         self.query_one("#run", Button).disabled = running
+        sidebar = self.query_one("#sidebar", VerticalScroll)
+        try:
+            btn_toggle = self.query_one("#btn_toggle_sidebar", Button)
+        except NoMatches:
+            btn_toggle = None
+
         if running:
+            sidebar.add_class("collapsed")
+            if btn_toggle:
+                btn_toggle.label = "[⮞ Show Config]"
             banner = self.query_one("#result_banner", Static)
             banner.classes = ""
             banner.update("")
             self.query_one("#elapsed_time", Static).update("Elapsed Time: 00:00")
             self.query_one("#spark_activity", Sparkline).data = [0, 5]
+        else:
+            sidebar.remove_class("collapsed")
+            if btn_toggle:
+                btn_toggle.label = "[⮜ Hide Config]"
 
     def _update_stage(self, stage_name: str, progress_val: int) -> None:
         self.query_one("#status_label", Static).update(
