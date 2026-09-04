@@ -21,6 +21,7 @@ class IntegralConfig(BaseModel):
     default_instrument: str = "IBIS"
     ref_catalog: str = "/data/cat/hec/gnrl_refr_cat_0043.fits"
     omc_catalog: str = "/data/cat/omc/omc_refr_cat_0005.fits"
+    archive_mirror: str = "heasarc"
 
     @property
     def rep_base_prod(self) -> Path:

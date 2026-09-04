@@ -59,6 +59,12 @@ uv run integral status
 # Initialise local archive (default: ~/science/integral_data_archive)
 uv run integral data init
 
+# Inspect and test archive mirrors (heasarc, isdc, or custom endpoints)
+uv run integral data mirror --test
+
+# Switch default archive mirror
+uv run integral data mirror heasarc
+
 # Import/link existing revolution data (e.g. Revolution 0060)
 uv run integral data import-local /path/to/0060 --link
 
@@ -67,19 +73,20 @@ uv run integral data import-local /path/to/0060 --link
 # already present)
 uv run integral data download revolution 0060 --count 5
 
+# Download with an explicit mirror override
+uv run integral data download revolution 0060 --count 5 --mirror heasarc
+
 # Or fetch specific ScWs, or a whole file of ScW IDs
 uv run integral data download scw 006000010010,006000020010
 uv run integral data download file scw_list.txt
 
 # Full per-instrument IC calibration trees are large (multi-GB) and opt-in
-uv run integral data download calibration --ic-trees --instruments ibis,sc
+uv run integral data download calibration --ic-trees --instruments ibis,jmx1,jmx2,omc,spi
 ```
 > [!NOTE]
 > A reduction needs the full IC calibration tree (`--ic-trees`) for its instrument, not just
-> the default catalogs/IC-index/aux fetch above. Even with the full tree downloaded, IBIS
-> reductions currently fail during background estimation (`ISGR-BACK-BKG status -2004`) when
-> data is sourced from this HEASARC-based downloader rather than ISDC's own (currently offline)
-> IC distribution — see `docs/status_report.md` for the full investigation.
+> the default catalogs/IC-index/aux fetch above. The CLI features automated mirror health checks
+> with fallback and seamless switching between HEASARC and European archive mirrors.
 
 ### 5. Run Scientific Reduction Pipelines via CLI
 ```bash
@@ -187,11 +194,15 @@ docker build --platform linux/amd64 \
 ├── scripts/                    # Validation & diagnostic tools
 │   ├── fetch_integral_data.py  # Standalone archive fetcher
 │   └── validate_science_products.py # Numerical verification against ISDC reference runs
+├── validation/                 # Phase A Experimental Validation Suite (ESA OSA test data)
+│   ├── run_testdata_validation.py # Automated runner & per-HDU FITS scientific diff engine
+│   ├── scripts/                # Tailored container scripts for IBIS, JEM-X, OMC, SPI, PiCSIT
+│   └── README.md               # Full validation protocol, lineage, and replication guide
 ├── tests/                      # Automated pytest suite (CLI, TUI, data, analysis)
 │   ├── test_analysis.py        # Pipeline invocation & energy band parsing tests
 │   ├── test_cli.py             # Typer CLI smoke & help tests
 │   ├── test_config.py          # Configuration loading & override tests
-│   ├── test_data_mgr.py        # Data archive & download tests
+│   ├── test_data_mgr.py        # Data archive, mirror switching & download tests
 │   ├── test_scw_utils.py       # ScW spec & pointing filter tests
 │   └── test_tui.py             # Textual async pilot tests (forms, timing, collapse)
 ├── docs/                       # Technical publications & documentation
