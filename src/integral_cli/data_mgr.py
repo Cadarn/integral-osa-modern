@@ -48,7 +48,7 @@ def resolve_mirror_base(mirror: str | None = None) -> tuple[str, str]:
     if key in KNOWN_MIRRORS:
         return key, KNOWN_MIRRORS[key]
     # If a full URL was provided
-    if raw.startswith("http://") or raw.startswith("https://"):
+    if raw.startswith(("http://", "https://")):
         return "custom", raw.rstrip("/")
     # Default fallback
     return DEFAULT_MIRROR_NAME, KNOWN_MIRRORS[DEFAULT_MIRROR_NAME]
@@ -57,6 +57,7 @@ def resolve_mirror_base(mirror: str | None = None) -> tuple[str, str]:
 async def probe_mirror_health(base_url: str, timeout_sec: float = 5.0) -> tuple[bool, float, str]:
     """Ping a mirror to assess latency and availability. Returns (is_available, latency_seconds, error_msg)."""
     import time
+
     start = time.perf_counter()
     try:
         async with httpx.AsyncClient(timeout=timeout_sec, follow_redirects=True) as client:
@@ -829,26 +830,40 @@ _SCOPE_HELP = {
 async def _check_and_select_mirror(mirror_opt: str | None = None) -> tuple[str, str]:
     """Resolve requested mirror and test connectivity. Prompt or warn if unreachable/slow."""
     mirror_name, base_url = resolve_mirror_base(mirror_opt)
-    console.print(f"[dim]Checking mirror connectivity: [cyan]{mirror_name}[/cyan] ({base_url})...[/dim]")
+    console.print(
+        f"[dim]Checking mirror connectivity: [cyan]{mirror_name}[/cyan] ({base_url})...[/dim]"
+    )
     ok, latency, err = await probe_mirror_health(base_url, timeout_sec=6.0)
 
     if not ok:
-        console.print(f"[bold yellow]⚠️  Warning: Mirror '{mirror_name}' is currently unreachable or slow ({err}).[/bold yellow]")
+        console.print(
+            f"[bold yellow]⚠️  Warning: Mirror '{mirror_name}' is currently unreachable or slow ({err}).[/bold yellow]"
+        )
         # Suggest alternative mirror if using standard mirror
         alt_name = "isdc" if mirror_name == "heasarc" else "heasarc"
         alt_url = KNOWN_MIRRORS.get(alt_name)
         if alt_url:
-            console.print(f"[yellow]Testing alternative mirror '{alt_name}' ({alt_url})...[/yellow]")
-            alt_ok, alt_latency, alt_err = await probe_mirror_health(alt_url, timeout_sec=5.0)
+            console.print(
+                f"[yellow]Testing alternative mirror '{alt_name}' ({alt_url})...[/yellow]"
+            )
+            alt_ok, alt_latency, _alt_err = await probe_mirror_health(alt_url, timeout_sec=5.0)
             if alt_ok:
-                console.print(f"[bold green]✓ Alternative mirror '{alt_name}' is online ({alt_latency:.2f}s latency)![/bold green]")
+                console.print(
+                    f"[bold green]✓ Alternative mirror '{alt_name}' is online ({alt_latency:.2f}s latency)![/bold green]"
+                )
                 if Confirm.ask(f"Would you like to switch to '{alt_name}' mirror?", default=True):
                     return alt_name, alt_url
-        console.print(f"[yellow]Proceeding with '{mirror_name}' as requested (may experience timeouts).[/yellow]")
+        console.print(
+            f"[yellow]Proceeding with '{mirror_name}' as requested (may experience timeouts).[/yellow]"
+        )
     elif latency > 3.0:
-        console.print(f"[yellow]⚠️  Notice: Mirror '{mirror_name}' responded slowly ({latency:.2f}s).[/yellow]")
+        console.print(
+            f"[yellow]⚠️  Notice: Mirror '{mirror_name}' responded slowly ({latency:.2f}s).[/yellow]"
+        )
     else:
-        console.print(f"[dim green]✓ Mirror '{mirror_name}' active ({latency:.2f}s response).[/dim green]")
+        console.print(
+            f"[dim green]✓ Mirror '{mirror_name}' active ({latency:.2f}s response).[/dim green]"
+        )
 
     return mirror_name, base_url
 
@@ -1048,7 +1063,7 @@ def download_file_cmd(
         raise typer.Exit(code=1)
 
     async def _main():
-        chosen_mirror_name, base_url = await _check_and_select_mirror(mirror)
+        _chosen_mirror_name, base_url = await _check_and_select_mirror(mirror)
         async with httpx.AsyncClient(http2=True, follow_redirects=True) as client:
             await _run_data_download(
                 client,
@@ -1186,7 +1201,9 @@ def mirror_cmd(
     name: str | None = typer.Argument(
         None, help="Mirror name ('heasarc', 'isdc') or custom URL to set as default"
     ),
-    test: bool = typer.Option(False, "--test", "-t", help="Test latency and availability of all known mirrors"),
+    test: bool = typer.Option(
+        False, "--test", "-t", help="Test latency and availability of all known mirrors"
+    ),
 ):
     """Show, test, or configure the default archive mirror."""
     if test or not name:
@@ -1219,4 +1236,6 @@ def mirror_cmd(
         resolved_name, base_url = resolve_mirror_base(name)
         config.archive_mirror = resolved_name if resolved_name in KNOWN_MIRRORS else base_url
         config.save()
-        console.print(f"[bold green]✓ Default archive mirror set to: [cyan]{config.archive_mirror}[/cyan] ({base_url})[/bold green]")
+        console.print(
+            f"[bold green]✓ Default archive mirror set to: [cyan]{config.archive_mirror}[/cyan] ({base_url})[/bold green]"
+        )
