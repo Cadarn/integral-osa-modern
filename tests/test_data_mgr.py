@@ -117,7 +117,7 @@ async def test_async_download_aux_returns_zero_on_404(tmp_path):
 
 
 def test_download_revolution_applies_count_after_pointing_filter(monkeypatch):
-    async def fake_list_remote_scws(client, rev_id):
+    async def fake_list_remote_scws(client, rev_id, *args, **kwargs):
         assert rev_id == "0060"
         return ["006000010010", "006000010021", "006000020010"]
 
@@ -140,7 +140,7 @@ def test_download_revolution_applies_count_after_pointing_filter(monkeypatch):
 
 
 def test_download_revolution_explicit_range_bypasses_pointing_filter(monkeypatch):
-    async def fake_list_remote_scws(client, rev_id):
+    async def fake_list_remote_scws(client, rev_id, *args, **kwargs):
         return ["006000010010", "006000010021", "006000020010"]
 
     calls = {}
@@ -171,7 +171,7 @@ def test_download_revolution_explicit_range_bypasses_pointing_filter(monkeypatch
 
 
 def test_download_revolution_errors_when_no_scws_found(monkeypatch):
-    async def fake_list_remote_scws(client, rev_id):
+    async def fake_list_remote_scws(client, rev_id, *args, **kwargs):
         return []
 
     monkeypatch.setattr(data_mgr, "async_list_remote_scws", fake_list_remote_scws)
@@ -243,3 +243,37 @@ def test_download_calibration_dry_run_never_calls_download_calibration(monkeypat
 
     assert result.exit_code == 0, result.output
     assert called is False
+
+
+# --- Mirror selection & health check tests ------------------------------------------------
+
+
+def test_resolve_mirror_base_known_and_custom():
+    name, url = data_mgr.resolve_mirror_base("heasarc")
+    assert name == "heasarc"
+    assert url == data_mgr.KNOWN_MIRRORS["heasarc"]
+
+    name, url = data_mgr.resolve_mirror_base("isdc")
+    assert name == "isdc"
+    assert url == data_mgr.KNOWN_MIRRORS["isdc"]
+
+    name, url = data_mgr.resolve_mirror_base("https://my-custom-mirror.org/data/")
+    assert name == "custom"
+    assert url == "https://my-custom-mirror.org/data"
+
+
+def test_data_mirror_command_displays_and_sets(monkeypatch, tmp_path):
+    result = runner.invoke(app, ["data", "mirror"])
+    assert result.exit_code == 0
+    assert "heasarc" in result.output
+    assert "isdc" in result.output
+
+    # Test setting mirror
+    result_set = runner.invoke(app, ["data", "mirror", "isdc"])
+    assert result_set.exit_code == 0
+    assert "isdc" in result_set.output
+    assert data_mgr.config.archive_mirror == "isdc"
+
+    # Reset back to heasarc
+    runner.invoke(app, ["data", "mirror", "heasarc"])
+    assert data_mgr.config.archive_mirror == "heasarc"
