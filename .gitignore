@@ -30,3 +30,5 @@ commonlog.txt
 .vscode/
 .idea/
 validation_runs/
+ic_orig/
+.integral/

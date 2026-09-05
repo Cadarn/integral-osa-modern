@@ -204,12 +204,14 @@ docker build --platform linux/amd64 \
 │   ├── main.py                 # CLI entry point (`integral`)
 │   ├── tui.py                  # Full-featured Textual TUI dashboard (`integral tui`)
 │   ├── analysis.py             # Pipeline runners & wizards (IBIS, JEM-X, OMC, SPI)
+│   ├── cal_cli.py              # Calibration profile & historical replay CLI (`integral cal`)
+│   ├── cal_profiles.py         # Calibration rules, profile provisioning & index filtering
 │   ├── config.py               # Centralised paths, Docker image & environment settings
-│   ├── data_mgr.py             # Data archive manager & HEASARC downloader
+│   ├── data_mgr.py             # Data archive manager, mirror switching & downloader
 │   ├── docker_mgr.py           # Docker execution engine & architecture detector
 │   ├── scw_utils.py            # Science window parsing & pointing filter utilities
 │   ├── viewer.py               # FITS mosaic image viewer & statistics
-│   └── benchmark.py            # Cross-architecture benchmark suite
+│   └── benchmark.py            # Cross-architecture benchmark & run comparison suite
 ├── pipeline/                   # Distributed execution components
 │   ├── scw_distributor.py      # Multi-worker Science Window job distributor
 │   └── runner_scw.sh           # Per-ScW container execution wrapper script
@@ -220,8 +222,9 @@ docker build --platform linux/amd64 \
 │   ├── run_testdata_validation.py # Automated runner & per-HDU FITS scientific diff engine
 │   ├── scripts/                # Tailored container scripts for IBIS, JEM-X, OMC, SPI, PiCSIT
 │   └── README.md               # Full validation protocol, lineage, and replication guide
-├── tests/                      # Automated pytest suite (CLI, TUI, data, analysis)
+├── tests/                      # Automated pytest suite (CLI, TUI, data, analysis, cal)
 │   ├── test_analysis.py        # Pipeline invocation & energy band parsing tests
+│   ├── test_cal_profiles.py    # Calibration profile and rule constraint tests
 │   ├── test_cli.py             # Typer CLI smoke & help tests
 │   ├── test_config.py          # Configuration loading & override tests
 │   ├── test_data_mgr.py        # Data archive, mirror switching & download tests
