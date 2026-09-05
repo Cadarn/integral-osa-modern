@@ -379,6 +379,47 @@ def clean_ic_master_file(dest_base: Path):
                 master[2] = new_table
                 master.flush()
 
+            # Also validate HDU 3 (GNRL-CHAR-LST) active aliases to ensure configured version numbers resolve locally
+            if len(master) >= 4 and master[3].data is not None:
+                d3 = master[3].data
+                osa_rows = [r for r in d3 if r["MNEMONIC"] == "OSA"]
+                if osa_rows:
+                    active_row = osa_rows[0]
+                    missing_subsystems: list[str] = []
+                    for col in d3.names:
+                        val = active_row[col]
+                        if isinstance(val, (int, float)) and val > 0:
+                            cand_idx = col.replace("_", "-") + "-IDX.fits"
+                            idx_file = idx_dir / cand_idx
+                            if not idx_file.exists():
+                                continue
+                            try:
+                                with fits.open(idx_file) as sub_hdul:
+                                    if len(sub_hdul) > 1 and sub_hdul[1].data is not None:
+                                        s_data = sub_hdul[1].data
+                                        if "VERSION" in s_data.names:
+                                            matches = s_data[s_data["VERSION"] == val]
+                                            if len(matches) == 0:
+                                                missing_subsystems.append(
+                                                    f"{col} (ver {val} not in {cand_idx})"
+                                                )
+                                            elif "MEMBER_LOCATION" in s_data.names:
+                                                loc = str(matches[0]["MEMBER_LOCATION"])
+                                                target_file = (idx_dir / loc).resolve()
+                                                if not target_file.exists():
+                                                    missing_subsystems.append(
+                                                        f"{col} ({target_file.name} missing)"
+                                                    )
+                            except (OSError, KeyError, ValueError) as sub_err:
+                                console.print(
+                                    f"[dim]Debug: failed checking {idx_file.name}: {sub_err}[/dim]"
+                                )
+                    if missing_subsystems:
+                        console.print(
+                            f"[dim yellow]Notice: {len(missing_subsystems)} calibration subsystem(s) in active alias 'OSA' unresolved: "
+                            f"{', '.join(missing_subsystems[:3])}{'...' if len(missing_subsystems) > 3 else ''}[/dim yellow]"
+                        )
+
     except Exception as e:
         console.print(
             f"[dim yellow]Notice: ic_master_file pruning check skipped ({e})[/dim yellow]"

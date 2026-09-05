@@ -61,6 +61,8 @@ def compare_fits_tree(
             with fits.open(ref_f) as hr, fits.open(test_f) as ht:
                 max_rel = 0.0
                 max_abs = 0.0
+                min_corr = 1.0
+                diff_hdus = []
                 file_ok = True
 
                 for idx in range(min(len(hr), len(ht))):
@@ -83,8 +85,22 @@ def compare_fits_tree(
                             rel_val = abs_val / denom
                             max_abs = max(max_abs, abs_val)
                             max_rel = max(max_rel, rel_val)
+
+                            # Pearson correlation for image/floating arrays
+                            corr = 1.0
+                            if np.sum(mask) > 1:
+                                r_flat = dr[mask].ravel().astype(np.float64)
+                                t_flat = dt[mask].ravel().astype(np.float64)
+                                std_r = np.std(r_flat)
+                                std_t = np.std(t_flat)
+                                if std_r > 1e-12 and std_t > 1e-12:
+                                    corr = float(np.corrcoef(r_flat, t_flat)[0, 1])
+                                    min_corr = min(min_corr, corr)
+
                             if rel_val > tolerance:
                                 file_ok = False
+                                extname = hr[idx].name if hasattr(hr[idx], "name") else f"HDU_{idx}"
+                                diff_hdus.append(f"{extname}(rel={rel_val:.1e}, r={corr:.6f})")
 
                 if file_ok:
                     passed += 1
@@ -93,7 +109,10 @@ def compare_fits_tree(
                 else:
                     diffed += 1
                     status = "[red]DIFF[/red]"
-                    details = f"Max Rel Diff = {max_rel:.2e} > {tolerance:.2e}"
+                    hdu_summary = ", ".join(diff_hdus[:2])
+                    if len(diff_hdus) > 2:
+                        hdu_summary += f" (+{len(diff_hdus) - 2} more)"
+                    details = f"Max Rel = {max_rel:.2e} > {tolerance:.2e} [min r={min_corr:.6f} in {hdu_summary}]"
 
                 rows.append((str(rel), status, details))
 

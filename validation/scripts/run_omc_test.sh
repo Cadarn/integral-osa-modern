@@ -59,14 +59,23 @@ docker run --rm \
     -v "${IC_DATA_DIR}/ic:/data/ic:ro" \
     -v "${IC_DATA_DIR}/idx:/data/idx:ro" \
     -v "${IC_DATA_DIR}/cat:/data/cat:ro" \
+    -e HOME=/home/integral \
     "${DOCKER_IMAGE}" \
     bash -c "
         set -euo pipefail
         cd /home/integral
 
-        export PFILES=\"/home/integral/pfiles;/opt/osa/pfiles\"
+        export ISDC_ENV=\"\${ISDC_ENV:-/opt/osa}\"
+        if [[ -f \"\${ISDC_ENV}/bin/isdc_init_env.sh\" && -z \"\${REP_BASE_PROD:-}\" ]]; then
+            set +u
+            source \"\${ISDC_ENV}/bin/isdc_init_env.sh\" >/dev/null 2>&1 || true
+            set -u
+        fi
+        export PATH=\"\${ISDC_ENV}/bin:\${PATH}\"
+        export PFILES=\"/home/integral/pfiles;\${ISDC_ENV}/pfiles\"
         export COMMONSCRIPT=1
         export COMMONLOGFILE=+/home/integral/common_log.txt
+        export REP_BASE_PROD=/data
         export ISDC_REF_CAT=/data/cat/hec/gnrl_refr_cat_0043.fits[1]
         export ISDC_OMC_CAT=/data/cat/omc/omc_refr_cat_0005.fits[1]
 
@@ -90,7 +99,8 @@ docker run --rm \
             chatter=1 \
             startLevel='COR' \
             endLevel='IMA' \
-            IMA_wcsFlag=no
+            IMA_wcsFlag=no \
+            IC_Group='/data/idx/ic/ic_master_file.fits[1]'
     "
 
 END_TIME=$(date +%s)

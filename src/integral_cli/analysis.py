@@ -341,6 +341,11 @@ def run_ibis(
     clean: bool = typer.Option(
         True, "--clean/--no-clean", help="Clean prior observation group directory before run"
     ),
+    ic_alias: str = typer.Option(
+        "OSA",
+        "--ic-alias",
+        help="Instrument calibration alias name in ic_master_file (default: OSA)",
+    ),
     yes: bool = typer.Option(
         False, "--yes", "-y", help="Non-interactive mode: accept all defaults and skip confirmation"
     ),
@@ -516,7 +521,7 @@ def run_ibis(
         CAT_refCat="{config.ref_catalog}[ISGRI_FLAG>0]" \
         brSrcDOL="{config.ref_catalog}[ISGRI_FLAG2==5&&ISGR_FLUX_1>100]" \
         IC_Group="/data/idx/ic/ic_master_file.fits[1]" \
-        IC_Alias="OSA"
+        IC_Alias="{ic_alias}"
 
 
     # Copy commonlog to observation group directory for archiving
@@ -571,6 +576,11 @@ def run_jemx(
     og_name: str = typer.Option("obs_jemx", "--og", "-o", help="Observation group name"),
     clean: bool = typer.Option(
         True, "--clean/--no-clean", help="Clean prior observation group directory before run"
+    ),
+    ic_alias: str = typer.Option(
+        "OSA",
+        "--ic-alias",
+        help="Instrument calibration alias name in ic_master_file (default: OSA)",
     ),
 ):
     """Run JEM-X science analysis pipeline (j_science_analysis) with native ARM64 container."""
@@ -650,7 +660,7 @@ def run_jemx(
         CAT_I_usrCat="" \
         LCR_timeStep={time_step} \
         IC_Group="/data/idx/ic/ic_master_file.fits[1]" \
-        IC_Alias="OSA"
+        IC_Alias="{ic_alias}"
 
     # Copy commonlog to observation group directory for archiving
     cp -v /home/integral/commonlog.txt /home/integral/obs/{og_name}/{og_name}_run.log 2>/dev/null || true
@@ -684,6 +694,11 @@ def run_omc(
     og_name: str = typer.Option("obs_omc", "--og", "-o", help="Observation group name"),
     clean: bool = typer.Option(
         True, "--clean/--no-clean", help="Clean prior observation group directory before run"
+    ),
+    ic_alias: str = typer.Option(
+        "OSA",
+        "--ic-alias",
+        help="Instrument calibration alias name in ic_master_file (default: OSA)",
     ),
 ):
     """Run OMC science analysis pipeline (omc_science_analysis) with native ARM64 container."""
@@ -731,7 +746,7 @@ def run_omc(
         startLevel="{start_level}" \
         endLevel="{end_level}" \
         IC_Group="/data/idx/ic/ic_master_file.fits[1]" \
-        IC_Alias="OSA"
+        IC_Alias="{ic_alias}"
 
     # Copy commonlog to observation group directory for archiving
     cp -v /home/integral/commonlog.txt /home/integral/obs/{og_name}/{og_name}_run.log 2>/dev/null || true
@@ -769,6 +784,11 @@ def run_spi(
     og_name: str = typer.Option("obs_spi", "--og", "-o", help="Observation group name"),
     clean: bool = typer.Option(
         True, "--clean/--no-clean", help="Clean prior observation group directory before run"
+    ),
+    ic_alias: str = typer.Option(
+        "OSA",
+        "--ic-alias",
+        help="Instrument calibration alias name in ic_master_file (default: OSA)",
     ),
 ):
     """Run SPI science analysis pipeline (spi_science_analysis) with native ARM64 container."""
@@ -815,7 +835,7 @@ def run_spi(
         startLevel="{start_level}" \
         endLevel="{end_level}" \
         IC_Group="/data/idx/ic/ic_master_file.fits[1]" \
-        IC_Alias="OSA"
+        IC_Alias="{ic_alias}"
 
     # Copy commonlog to observation group directory for archiving
     cp -v /home/integral/commonlog.txt /home/integral/obs/{og_name}/{og_name}_run.log 2>/dev/null || true

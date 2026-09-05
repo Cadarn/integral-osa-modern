@@ -2,7 +2,9 @@
 
 **Last Updated**: 5 September 2026  
 **Current Active Branch**: `feature/phase-a-validation-suite`  
-**Benchmarked Reference Host**: Apple MacBook Pro M4 Max (16 CPU cores, 36 GB Unified Memory), macOS Tahoe 26.5.2 (Build 25F84)  
+**Benchmarked Reference Hosts**:
+- Primary Development / Benchmark Host: Apple MacBook Pro M4 Pro (12-core CPU, 48 GB Unified Memory), macOS Tahoe 26.6.2 (Build 25G83)  
+- Prior Reference Host: Apple MacBook Pro M4 Max (16-core CPU, 36 GB Unified Memory), macOS Tahoe 26.5.2 (Build 25F84)  
 **Target Container Images**:
 - Native ARM64: `cadarn/osa:11-native-arm64` (`integralsw/osa:11-native-arm64`)
 - Modern AMD64: `cadarn/osa:11-modern-amd64` (`integralsw/osa:11-modern-amd64`)
@@ -28,12 +30,22 @@ This document tracks completed milestones, current progress across instruments a
 
 ## 2. Completed Milestones (Ready & Committed)
 
-### A. Phase A Multi-Instrument Experimental Validation
-- Verified all 4 primary instruments against canonical ESA testdata (`integral_test_data/*docker_outref`):
-  - **SPI**: 10 ScWs, **11.4 s**, 29/29 files verified (100% pass, Rel Diff $< 1.3 \times 10^{-8}$, Crab $159.75\,\sigma$).
-  - **OMC**: 2 ScWs, **17.3 s**, 16/16 files verified (100% bitwise pass, identical $V$-magnitudes).
-  - **JEM-X 2**: 2 ScWs, **72.4 s**, 25/28 files verified (89.3% pass, Pearson $r \ge 0.999995$ on sky maps, Crab $38.98\,\sigma$, $< 0.007''$ astrometry).
-  - **IBIS/ISGRI**: 4 ScWs, **162.2 s**, 44/77 files verified (events/dead time/GTIs bitwise identical, Crab $313.95\,\sigma$).
+### A. Phase A Multi-Instrument Experimental Validation & Architecture Benchmark
+- Completed end-to-end benchmark and cross-architecture comparison across all 4 primary instruments on MacBook Pro M4 Pro (macOS Tahoe 26.6.2):
+  - **OMC** (2 ScWs):
+    - ARM64: **13.4 s** | x86: **35.7 s** (**2.66x speedup**)
+    - 100% bitwise matching on all 297 stars ($\Delta\text{Mag}_V = 0.000$, offset $= 0.00''$). 16/16 FITS products verified.
+  - **SPI** (10 ScWs):
+    - ARM64: **8.1 s** | x86: **18.0 s** (**2.22x speedup**)
+    - 100% numerical match (Crab detection $159.75\sigma$ on both ARM64 and x86, $\Delta = 0.00\sigma$, offset $= 0.00''$). 29/29 FITS products verified.
+  - **JEM-X 2** (2 ScWs):
+    - ARM64: **61.5 s** | x86: **117.1 s** (**1.90x speedup**)
+    - ARM64 yields Crab $38.02\sigma$ exactly matching the ESA reference ($38.02\sigma$), reflecting updated `j_ima_iros 6.2.4`.
+  - **IBIS/ISGRI** (4 ScWs):
+    - ARM64: **119.3 s** (Modern IC) / **121.0 s** (Legacy IC) | x86: **270.7 s** (Modern IC) / **278.4 s** (Legacy IC) (**2.27x - 2.30x speedup**)
+    - Modern IC Crab: ARM64 $299.60\sigma$ ($98.24 \pm 0.33$ cts/s) vs x86 $299.36\sigma$ ($98.20 \pm 0.33$ cts/s) — **99.92% cross-architecture agreement**.
+    - Legacy IC Crab (`ISGR_EFFC_MOD=1`): ARM64 $314.36\sigma$ ($141.77 \pm 0.45$ cts/s) vs x86 $313.97\sigma$ ($141.68 \pm 0.45$ cts/s), directly tracing ESA reference ($328.77\sigma$, $145.39 \pm 0.44$ cts/s).
+- Detailed guide on modifying `ic_master_file.fits` for legacy/historic analysis created at `docs/calibration_legacy_modifications.md`.
 - Detailed report checked into `validation_runs/reports/phase_a_validation_report.md`.
 
 ### B. Archive Mirror Switching & Health Probing
