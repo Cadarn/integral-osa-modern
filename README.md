@@ -231,6 +231,7 @@ docker build --platform linux/amd64 \
 │   ├── test_scw_utils.py       # ScW spec & pointing filter tests
 │   └── test_tui.py             # Textual async pilot tests (forms, timing, collapse)
 ├── docs/                       # Technical publications & documentation
+│   ├── task_tracker.md         # Multi-machine task tracker & handover guide
 │   ├── technical_rebuild_arm64.md # MNRAS Techniques paper draft
 │   ├── status_report.md        # Calibration & background estimation status
 │   └── technical_roadmap.md    # Multi-phase development roadmap
