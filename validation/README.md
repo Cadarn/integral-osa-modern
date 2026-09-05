@@ -88,5 +88,26 @@ Each instrument script can also be executed independently:
 ## 📊 Interpreting Results
 
 * **VERIFIED**: The generated FITS arrays match the reference `*docker_outref` within the specified relative numerical tolerance ($\Delta < 0.1\%$).
-* **DIFF**: Differences exceed tolerance (investigate via `uv run python scripts/validate_science_products.py compare <ref_dir> <test_dir>`).
+* **DIFF**: Differences exceed tolerance (investigate via `uv run integral benchmark compare <ref_dir> <test_dir>`).
 * **MISSING**: Expected product was not produced (inspect `validation_runs/<instrument>/common_log.txt` for pipeline errors).
+
+---
+
+## 📈 Phase A Multi-Instrument Benchmark Results
+
+### Benchmark Host Specification
+* **Hardware**: Apple MacBook Pro M4 Max (16 CPU cores, 36 GB Unified Memory)
+* **Operating System**: macOS Tahoe 26.5.2 (Darwin Kernel Build 25F84)
+* **Runtime**: Docker Desktop on Apple Silicon, native AArch64 container (`cadarn/osa:11-native-arm64`)
+* **Reference Data**: Official ESA/ISDC OSA 11.2 canonical test dataset (`integral_test_data/*docker_outref`)
+
+### Results Summary
+
+| Instrument | ScW Count | Duration | Products Verified | Numerical Concordance | Key Target Findings |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **SPI** | 10 ScWs | **11.4 s** | **29 / 29 (100%)** | Rel Diff $< 1.3 \times 10^{-8}$ (IEEE-754) | Crab detected at **$159.75\,\sigma$** (identical to 5 decimal places) |
+| **OMC** | 2 ScWs | **17.3 s** | **16 / 16 (100%)** | Rel Diff $\le 0.00$ (Bitwise identical) | Optical apertures, $V$-band magnitudes, & fluxes identical |
+| **JEM-X 2** | 2 ScWs | **72.4 s** | **25 / 28 (89.3%)** | Pearson $r \ge 0.999995$ on sky maps | Crab at **$38.98\,\sigma$** (astrometry offset $< 0.007''$) |
+| **IBIS/ISGRI** | 4 ScWs | **162.2 s** | **44 / 77 (57.1%)** | Raw events, GTIs, dead time bitwise | Crab detected at **$313.95\,\sigma$** (modern) / **$332.21\,\sigma$** (ref) |
+
+Detailed report available in [`validation_runs/reports/phase_a_validation_report.md`](../validation_runs/reports/phase_a_validation_report.md).
