@@ -109,6 +109,28 @@ uv run integral analyse omc rev:0060:5
 uv run integral analyse spi rev:0060:5
 ```
 
+### 6. Calibration Profiles & Historical Baseline Replay (`integral cal`)
+Scientific workflows often require testing modern reductions against historic baseline releases (e.g. reproducing official ESA/ISDC 2022 test datasets):
+
+```bash
+# List available calibration profiles (built-in and custom)
+uv run integral cal list
+
+# Inspect exact index table constraints for a profile
+uv run integral cal show esa-2022
+
+# Provision isolated IC environment for an epoch
+uv run integral cal provision esa-2022
+
+# Create a new custom profile interactively or from a JSON configuration
+uv run integral cal create my-epoch-2015
+uv run integral cal create --from-file profile.json
+
+# Cross-compare scientific source detections and astrometric offsets between two runs
+uv run integral benchmark compare ./runs/esa_ref ./runs/modern_arm64 \
+    --label-a "ESA Ref 2022" --label-b "Modern ARM64"
+```
+
 ---
 
 ## 🐳 Running Docker Images Directly (Without the CLI)

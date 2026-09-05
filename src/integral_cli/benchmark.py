@@ -167,3 +167,92 @@ def run_benchmark(
         )
 
     console.print("\n", table)
+
+
+@benchmark_app.command("compare")
+def compare_runs(
+    run_a: Path = typer.Argument(..., help="Path to first observation run directory"),
+    run_b: Path = typer.Argument(..., help="Path to second observation run directory"),
+    label_a: str = typer.Option("Run A", "--label-a", help="Display label for Run A"),
+    label_b: str = typer.Option("Run B", "--label-b", help="Display label for Run B"),
+):
+    """Compare science results (detection significance, fluxes, coordinates) between two runs."""
+    import numpy as np
+
+    if not run_a.exists() or not run_b.exists():
+        console.print("[bold red]Error: Both run directories must exist.[/bold red]")
+        raise typer.Exit(code=1)
+
+    console.print(
+        Panel(
+            f"[bold green]INTEGRAL Cross-Run Calibration & Scientific Comparison[/bold green]\n\n"
+            f"• [cyan]{label_a}[/cyan]: {run_a}\n"
+            f"• [cyan]{label_b}[/cyan]: {run_b}",
+            title="Comparison Setup",
+        )
+    )
+
+    # Search for source results
+    res_candidates = [
+        ("IBIS", "isgri_srcl_res.fits", "isgri_mosa_res.fits"),
+        ("JEM-X", "jmx2_srcl_res.fits", "jmx2_obs_res.fits"),
+        ("SPI", "source_res.fits", "source_res.fits"),
+    ]
+
+    found = False
+    for instr, scw_res, obs_res in res_candidates:
+        f_a = list(run_a.rglob(f"*{obs_res}*")) or list(run_a.rglob(f"*{scw_res}*"))
+        f_b = list(run_b.rglob(f"*{obs_res}*")) or list(run_b.rglob(f"*{scw_res}*"))
+
+        if f_a and f_b:
+            found = True
+            try:
+                with fits.open(f_a[0]) as ha, fits.open(f_b[0]) as hb:
+                    da = ha[1].data
+                    db = hb[1].data
+                    if da is None or db is None or "NAME" not in da.names:
+                        continue
+
+                    table = Table(
+                        title=f"{instr} Source Detection Comparison", title_style="bold cyan"
+                    )
+                    table.add_column("Source Name", style="bold yellow")
+                    table.add_column(f"{label_a} DetSig", justify="right", style="cyan")
+                    table.add_column(f"{label_b} DetSig", justify="right", style="magenta")
+                    table.add_column("Δ DetSig (σ)", justify="right", style="bold")
+                    table.add_column("Offset (arcsec)", justify="right", style="green")
+
+                    sources_b = {str(r["NAME"]).strip(): r for r in db}
+                    for row_a in da:
+                        s_name = str(row_a["NAME"]).strip()
+                        if s_name in sources_b:
+                            row_b = sources_b[s_name]
+                            sig_a = float(row_a["DETSIG"]) if "DETSIG" in da.names else 0.0
+                            sig_b = float(row_b["DETSIG"]) if "DETSIG" in db.names else 0.0
+                            delta_sig = sig_b - sig_a
+
+                            ra_a = float(row_a["RA_OBJ"]) if "RA_OBJ" in da.names else 0.0
+                            dec_a = float(row_a["DEC_OBJ"]) if "DEC_OBJ" in da.names else 0.0
+                            ra_b = float(row_b["RA_OBJ"]) if "RA_OBJ" in db.names else 0.0
+                            dec_b = float(row_b["DEC_OBJ"]) if "DEC_OBJ" in db.names else 0.0
+
+                            d_ra = (ra_b - ra_a) * np.cos(np.radians(dec_a)) * 3600.0
+                            d_dec = (dec_b - dec_a) * 3600.0
+                            offset = np.hypot(d_ra, d_dec)
+
+                            table.add_row(
+                                s_name,
+                                f"{sig_a:.2f}σ",
+                                f"{sig_b:.2f}σ",
+                                f"{delta_sig:+.2f}σ",
+                                f'{offset:.2f}"',
+                            )
+
+                    console.print(table)
+            except Exception as e:
+                console.print(f"[dim yellow]Warning while comparing {instr}: {e}[/dim yellow]")
+
+    if not found:
+        console.print(
+            "[dim yellow]No standard source result tables found for automated comparison.[/dim yellow]"
+        )
