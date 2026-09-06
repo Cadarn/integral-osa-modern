@@ -7,6 +7,7 @@ import re
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
 import httpx
 import typer
@@ -380,8 +381,9 @@ def clean_ic_master_file(dest_base: Path):
                 master.flush()
 
             # Also validate HDU 3 (GNRL-CHAR-LST) active aliases to ensure configured version numbers resolve locally
-            if len(master) >= 4 and master[3].data is not None:
-                d3 = master[3].data
+            hdu3: Any = master[3] if len(master) >= 4 else None
+            if hdu3 is not None and hdu3.data is not None:
+                d3 = hdu3.data
                 osa_rows = [r for r in d3 if r["MNEMONIC"] == "OSA"]
                 if osa_rows:
                     active_row = osa_rows[0]
@@ -395,8 +397,9 @@ def clean_ic_master_file(dest_base: Path):
                                 continue
                             try:
                                 with fits.open(idx_file) as sub_hdul:
-                                    if len(sub_hdul) > 1 and sub_hdul[1].data is not None:
-                                        s_data = sub_hdul[1].data
+                                    sub_hdu1: Any = sub_hdul[1] if len(sub_hdul) > 1 else None
+                                    if sub_hdu1 is not None and sub_hdu1.data is not None:
+                                        s_data = sub_hdu1.data
                                         if "VERSION" in s_data.names:
                                             matches = s_data[s_data["VERSION"] == val]
                                             if len(matches) == 0:

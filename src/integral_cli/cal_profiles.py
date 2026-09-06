@@ -10,6 +10,7 @@ Calibration profile management:
 import json
 import shutil
 from pathlib import Path
+from typing import Any
 
 from astropy.io import fits
 from pydantic import BaseModel, Field
@@ -159,8 +160,9 @@ def provision_profile_tree(profile: CalibrationProfile, base_archive: Path | Non
 
         try:
             with fits.open(idx_file, mode="update") as hdul:
-                if len(hdul) > 1 and hdul[1].data is not None:
-                    data = hdul[1].data
+                hdu1: Any = hdul[1] if len(hdul) > 1 else None
+                if hdu1 is not None and hdu1.data is not None:
+                    data = hdu1.data
                     mask = None
 
                     if "VERSION" in data.names:
@@ -176,7 +178,7 @@ def provision_profile_tree(profile: CalibrationProfile, base_archive: Path | Non
                         mask = target_mask if mask is None else (mask & target_mask)
 
                     if mask is not None:
-                        hdul[1].data = data[mask]
+                        hdu1.data = data[mask]
                         hdul.flush()
         except Exception as err:
             console.print(f"[dim yellow]Warning: could not filter {rule.index}: {err}[/dim yellow]")

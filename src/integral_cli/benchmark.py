@@ -8,6 +8,7 @@ Benchmarking suite for comparing INTEGRAL OSA execution across:
 import json
 import time
 from pathlib import Path
+from typing import Any
 
 import typer
 from astropy.io import fits
@@ -213,20 +214,22 @@ def compare_runs(
                     da = None
                     db = None
                     for h in ha:
+                        h_any: Any = h
                         if (
-                            h.data is not None
-                            and getattr(h.data, "names", None)
-                            and ("NAME" in h.data.names or "OMC_ID" in h.data.names)
+                            h_any.data is not None
+                            and getattr(h_any.data, "names", None)
+                            and ("NAME" in h_any.data.names or "OMC_ID" in h_any.data.names)
                         ):
-                            da = h.data
+                            da = h_any.data
                             break
                     for h in hb:
+                        h_any: Any = h
                         if (
-                            h.data is not None
-                            and getattr(h.data, "names", None)
-                            and ("NAME" in h.data.names or "OMC_ID" in h.data.names)
+                            h_any.data is not None
+                            and getattr(h_any.data, "names", None)
+                            and ("NAME" in h_any.data.names or "OMC_ID" in h_any.data.names)
                         ):
-                            db = h.data
+                            db = h_any.data
                             break
 
                     if da is None or db is None:
