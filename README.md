@@ -200,46 +200,64 @@ docker build --platform linux/amd64 \
 │   ├── Dockerfile.batch        # Lightweight worker pod image for Kubernetes
 │   ├── init.sh                 # Container entrypoint environment loader
 │   └── init.d/                 # Runtime initialization scripts (OSA, uv, HEASoft)
-├── src/integral_cli/           # Unified CLI & Terminal User Interface
-│   ├── main.py                 # CLI entry point (`integral`)
-│   ├── tui.py                  # Full-featured Textual TUI dashboard (`integral tui`)
-│   ├── analysis.py             # Pipeline runners & wizards (IBIS, JEM-X, OMC, SPI)
-│   ├── cal_cli.py              # Calibration profile & historical replay CLI (`integral cal`)
-│   ├── cal_profiles.py         # Calibration rules, profile provisioning & index filtering
-│   ├── config.py               # Centralised paths, Docker image & environment settings
-│   ├── data_mgr.py             # Data archive manager, mirror switching & downloader
-│   ├── docker_mgr.py           # Docker execution engine & architecture detector
-│   ├── scw_utils.py            # Science window parsing & pointing filter utilities
-│   ├── viewer.py               # FITS mosaic image viewer & statistics
-│   └── benchmark.py            # Cross-architecture benchmark & run comparison suite
-├── pipeline/                   # Distributed execution components
-│   ├── scw_distributor.py      # Multi-worker Science Window job distributor
-│   └── runner_scw.sh           # Per-ScW container execution wrapper script
-├── scripts/                    # Validation & diagnostic tools
-│   ├── fetch_integral_data.py  # Standalone archive fetcher
-│   └── validate_science_products.py # Numerical verification against ISDC reference runs
-├── validation/                 # Phase A Experimental Validation Suite (ESA OSA test data)
-│   ├── run_testdata_validation.py # Automated runner & per-HDU FITS scientific diff engine
-│   ├── scripts/                # Tailored container scripts for IBIS, JEM-X, OMC, SPI, PiCSIT
-│   └── README.md               # Full validation protocol, lineage, and replication guide
-├── tests/                      # Automated pytest suite (CLI, TUI, data, analysis, cal)
-│   ├── test_analysis.py        # Pipeline invocation & energy band parsing tests
-│   ├── test_cal_profiles.py    # Calibration profile and rule constraint tests
-│   ├── test_cli.py             # Typer CLI smoke & help tests
-│   ├── test_config.py          # Configuration loading & override tests
-│   ├── test_data_mgr.py        # Data archive, mirror switching & download tests
-│   ├── test_scw_utils.py       # ScW spec & pointing filter tests
-│   └── test_tui.py             # Textual async pilot tests (forms, timing, collapse)
-├── docs/                       # Technical publications & documentation
-│   ├── task_tracker.md         # Multi-machine task tracker & handover guide
-│   ├── technical_rebuild_arm64.md # MNRAS Techniques paper draft
-│   ├── status_report.md        # Calibration & background estimation status
-│   └── technical_roadmap.md    # Multi-phase development roadmap
-├── k8s/                        # Kubernetes spot-instance distributed cluster manifests
-│   ├── job-template.yaml       # Distributed worker pod batch job definition
-│   └── node-pool-spot.yaml     # Spot instance node pool specifications
-├── pyproject.toml              # Dependencies & CLI build configuration (uv)
-└── LICENSE                     # MIT License
+├── src/
+│   ├── integral/                   # Modular Python library & unified CLI presentation
+│   │   ├── __init__.py             # Top-level exports and package version
+│   │   ├── core/                   # Pure domain logic & system interactions
+│   │   │   ├── config.py           # Configuration, archive paths & environment settings
+│   │   │   ├── docker.py           # Container orchestration & host architecture detection
+│   │   │   ├── data.py             # Data archive manager, mirror health & async downloaders
+│   │   │   ├── calibration.py      # Declarative calibration profiles & IC resolution engine
+│   │   │   ├── scw.py              # Science Window parsing & pointing filter utilities
+│   │   │   └── batch.py            # Batch workload partitioner for cloud distribution
+│   │   ├── instruments/            # Instrument-specific reduction pipelines
+│   │   │   ├── common.py           # Energy band parsers, ScW resolvers, time-step validation
+│   │   │   ├── ibis.py             # IBIS/ISGRI pipeline runner & parameter builder
+│   │   │   ├── jemx.py             # JEM-X 1 & 2 pipeline runner
+│   │   │   ├── omc.py              # OMC pipeline runner
+│   │   │   └── spi.py              # SPI pipeline runner
+│   │   ├── validation/             # Scientific evaluation & verification engines
+│   │   │   ├── compare.py          # FITS image & binary table numerical comparator
+│   │   │   └── benchmark.py        # Cross-architecture benchmark & run comparison suite
+│   │   ├── viewer/                 # FITS inspection & WCS rendering
+│   │   │   └── fits_view.py        # Matplotlib/WCS mosaic visualizer
+│   │   └── cli/                    # Presentation layer
+│   │       ├── main.py             # Root Typer entry point (`integral`)
+│   │       ├── cal_cli.py          # Calibration profile CLI (`integral cal`)
+│   │       └── tui/                # Interactive Textual TUI (`integral tui`)
+│   │           └── app.py          # Full-featured dashboard application
+│   └── integral_cli/               # Backward-compatibility import shim layer
+├── pipeline/                       # Distributed execution components & script shims
+│   ├── scw_distributor.py          # Multi-worker Science Window job distributor shim
+│   └── runner_scw.sh               # Per-ScW container execution wrapper script
+├── scripts/                        # Standalone diagnostic & fetching tools
+│   ├── fetch_integral_data.py      # Standalone archive fetcher shim
+│   └── validate_science_products.py# Numerical verification shim
+├── validation/                     # Phase A Experimental Validation Suite (ESA OSA test data)
+│   ├── run_testdata_validation.py  # Automated runner & per-HDU FITS scientific diff engine
+│   ├── scripts/                    # Tailored container scripts for IBIS, JEM-X, OMC, SPI, PiCSIT
+│   └── README.md                   # Full validation protocol, lineage, and replication guide
+├── tests/                          # Automated pytest suite (core, instruments, cli, structure)
+│   ├── test_integral_structure.py  # Package structure & backwards compatibility tests
+│   ├── test_analysis.py            # Pipeline invocation & energy band parsing tests
+│   ├── test_cal_profiles.py        # Calibration profile and rule constraint tests
+│   ├── test_cli.py                 # Typer CLI smoke & help tests
+│   ├── test_config.py              # Configuration loading & override tests
+│   ├── test_data_mgr.py            # Data archive, mirror switching & download tests
+│   ├── test_scw_utils.py           # ScW spec & pointing filter tests
+│   └── test_tui.py                 # Textual async pilot tests (forms, timing, collapse)
+├── docs/                           # Technical publications & documentation
+│   ├── task_tracker.md             # Multi-machine task tracker & handover guide
+│   ├── calibration_modern_manifest.md # Complete specification of modern IC baselines
+│   ├── calibration_legacy_modifications.md # Step-by-step guide to legacy IC tree editing
+│   ├── technical_rebuild_arm64.md  # MNRAS Techniques paper draft
+│   ├── status_report.md            # Calibration & background estimation status
+│   └── technical_roadmap.md        # Multi-phase development roadmap
+├── k8s/                            # Kubernetes spot-instance distributed cluster manifests
+│   ├── job-template.yaml           # Distributed worker pod batch job definition
+│   └── node-pool-spot.yaml         # Spot instance node pool specifications
+├── pyproject.toml                  # Dependencies & CLI build configuration (uv)
+└── LICENSE                         # MIT License
 ```
 
 ---
