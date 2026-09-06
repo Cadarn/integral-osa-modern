@@ -54,49 +54,49 @@ docker build --platform linux/amd64 -t integralsw/osa:11-modern-amd64 -f docker/
 
 ## Architecture
 
-### CLI layer (`src/integral_cli/`)
+The codebase follows the modern Python `src-layout` centered in `src/integral/` with backwards-compatibility shims provided in `src/integral_cli/`, `scripts/`, and `pipeline/`.
 
-- `main.py` — Typer app entry point (`integral` script); registers sub-apps as typer groups.
+### Core layer (`src/integral/core/`)
 - `config.py` — `IntegralConfig` (pydantic), persisted to `~/.integralrc.json`. Holds
   `data_dir`/`ic_dir` and resolves the ISDC env vars `REP_BASE_PROD` / `CURRENT_IC` (env var
   overrides config file). `host_arch` detects arm64 vs x86_64 to pick the right Docker image.
-- `docker_mgr.py` — builds/runs the OSA containers. `run_container()` is the shared execution
-  primitive: it mounts the local data archive (`scw/`, `aux/`, `ic/`, `idx/`, `cat/` as read-only
-  volumes keyed off `config.rep_base_prod`/`config.current_ic`), resolves symlink targets on the
-  host so they still work inside the container, matches host UID:GID, and runs a bash command
-  string inside the image after sourcing `/init.sh`. Every `analyse` subcommand calls this.
-- `analysis.py` — one Typer command per instrument (`ibis`, `jemx`, `omc`, `spi`). Each follows
-  the same pattern: resolve a `scw_input` argument (a `rev:NNNN[:limit]` revolution spec, a
-  comma-separated ScW ID list, or a path to a `scw.list` file) into a list of Science Window IDs,
-  write `scw.list` into the workdir, build a bash heredoc that sets ISDC env vars
-  (`ISDC_ENV`, `REP_BASE_PROD`, `PFILES`, `ISDC_REF_CAT`, ...), runs `og_create` to build an
-  Observation Group, then invokes the instrument's `*_science_analysis` executable with
-  instrument-specific parameters, and finally calls `run_container()`. When adding a new
-  instrument or pipeline stage, mirror this structure rather than introducing a different one.
-- `data_mgr.py` — async httpx/HTTP2 downloader for HEASARC's public INTEGRAL archive
-  (`https://heasarc.gsfc.nasa.gov/FTP/integral/data`); handles local archive layout
-  (`scw/<rev>/`, `idx/ic/`, `aux/adp/<rev>.001/`), atomic `.tmp`-then-rename downloads (with a
-  `force` override to re-download), and local data import. `integral data download` is a
-  sub-Typer (`revolution`/`scw`/`file`/`calibration`) — each resolves a target ScW set (remotely,
-  via `async_list_remote_scws`, unlike `analysis.py`'s local-directory resolution) and always
-  fetches catalogs + the IC index + per-revolution aux data unless `--science-only`; full
-  per-instrument IC calibration trees (`async_download_ic_tree`, can be multiple GB each) are
-  opt-in via `--ic-trees` since they're too large to fetch by default. `--dry-run` lists what
-  would be fetched without downloading; `--force-refresh` bypasses the exists-check.
-- `scw_utils.py` — `filter_pointing_scws()`, the pointing-ScW-selection convention (IDs ending
-  `0010`, falling back to all IDs) shared between `analysis.py`'s local resolution and
-  `data_mgr.py`'s remote resolution.
-- `viewer.py` — FITS mosaic/image viewing (WCS rendering, ZScale) and source-list summaries.
-- `benchmark.py` — cross-architecture (native ARM64 vs emulated x86_64) timing comparisons.
-- `tui.py` — Textual TUI (`integral tui`) for configuring and launching `analyse` runs
-  interactively. Launches `python -m integral_cli.main analyse ...` as a subprocess (rather than
-  calling `analysis.py`'s functions in-process) so output streams live into a log widget with zero
-  changes to the existing execution path; runs in a `@work(thread=True)` worker so the UI stays
-  responsive, marshalling widget updates back via `call_from_thread`.
+- `docker.py` — builds/runs the OSA containers. `run_container()` is the shared execution
+  primitive: mounts local data (`scw/`, `aux/`, `ic/`, `idx/`, `cat/` as read-only
+  volumes keyed off `config.rep_base_prod`/`config.current_ic`), resolves host symlinks,
+  matches host UID:GID, and executes within the container environment.
+- `data.py` — async httpx/HTTP2 downloader for HEASARC and ISDC archives; handles local archive layout
+  (`scw/<rev>/`, `idx/ic/`, `aux/adp/<rev>.001/`), atomic `.tmp`-then-rename downloads, mirror health
+  probing (`integral data mirror --test`), and local data import.
+- `calibration.py` — declarative calibration profiles (`CalibrationProfile`, `CalibrationRule`)
+  and index filtering engine for historical re-play and modern baselines.
+- `scw.py` — `filter_pointing_scws()`, the pointing-ScW-selection convention (IDs ending `0010`,
+  falling back to all IDs) shared between local and remote resolution.
+- `batch.py` — partitions Science Window lists into fixed-size JSON batch manifests for distributed
+  cloud and Kubernetes batch worker execution.
 
-`scripts/validate_science_products.py` (wired in as `integral validate`) and
-`scripts/fetch_integral_data.py` are standalone entry points also exposed via
-`[project.scripts]` in `pyproject.toml` (`integral-validate`, `integral-fetch`).
+### Instrument pipelines (`src/integral/instruments/`)
+- `common.py` — shared parameter parsing (`parse_energy_bands`, `parse_jemx_energy_channels`,
+  `validate_time_step`, `resolve_scw_ids`).
+- `ibis.py` — IBIS/ISGRI pipeline runner (`run_ibis`).
+- `jemx.py` — JEM-X 1 & 2 pipeline runner (`run_jemx`).
+- `omc.py` — OMC optical monitor pipeline runner (`run_omc`).
+- `spi.py` — SPI gamma-ray spectrometer pipeline runner (`run_spi`).
+
+### Validation & Analytics (`src/integral/validation/`)
+- `compare.py` — FITS numerical verification engine (images and binary tables) across architectures.
+- `benchmark.py` — cross-architecture execution timing and multi-run delta comparison suite.
+
+### Presentation & UI (`src/integral/cli/` & `src/integral/viewer/`)
+- `cli/main.py` — root Typer app entry point (`integral` script).
+- `cli/cal_cli.py` — calibration profile management CLI (`integral cal`).
+- `cli/tui/app.py` — Textual TUI (`integral tui`) for configuring and launching runs interactively.
+- `viewer/fits_view.py` — FITS mosaic/image viewing (WCS rendering, ZScale) and source-list summaries.
+
+### Backwards Compatibility Shims
+- `src/integral_cli/` — compatibility layer re-exporting modules so `import integral_cli` continues to work.
+- `scripts/validate_science_products.py` — CLI shim forwarding to `integral.validation.compare`.
+- `scripts/fetch_integral_data.py` — CLI shim forwarding to `integral.core.data`.
+- `pipeline/scw_distributor.py` — CLI shim forwarding to `integral.core.batch`.
 
 ### Science Window (ScW) addressing convention
 
