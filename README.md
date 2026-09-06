@@ -109,6 +109,28 @@ uv run integral analyse omc rev:0060:5
 uv run integral analyse spi rev:0060:5
 ```
 
+### 6. Calibration Profiles & Historical Baseline Replay (`integral cal`)
+Scientific workflows often require testing modern reductions against historic baseline releases (e.g. reproducing official ESA/ISDC 2022 test datasets):
+
+```bash
+# List available calibration profiles (built-in and custom)
+uv run integral cal list
+
+# Inspect exact index table constraints for a profile
+uv run integral cal show esa-2022
+
+# Provision isolated IC environment for an epoch
+uv run integral cal provision esa-2022
+
+# Create a new custom profile interactively or from a JSON configuration
+uv run integral cal create my-epoch-2015
+uv run integral cal create --from-file profile.json
+
+# Cross-compare scientific source detections and astrometric offsets between two runs
+uv run integral benchmark compare ./runs/esa_ref ./runs/modern_arm64 \
+    --label-a "ESA Ref 2022" --label-b "Modern ARM64"
+```
+
 ---
 
 ## 🐳 Running Docker Images Directly (Without the CLI)
@@ -182,12 +204,14 @@ docker build --platform linux/amd64 \
 │   ├── main.py                 # CLI entry point (`integral`)
 │   ├── tui.py                  # Full-featured Textual TUI dashboard (`integral tui`)
 │   ├── analysis.py             # Pipeline runners & wizards (IBIS, JEM-X, OMC, SPI)
+│   ├── cal_cli.py              # Calibration profile & historical replay CLI (`integral cal`)
+│   ├── cal_profiles.py         # Calibration rules, profile provisioning & index filtering
 │   ├── config.py               # Centralised paths, Docker image & environment settings
-│   ├── data_mgr.py             # Data archive manager & HEASARC downloader
+│   ├── data_mgr.py             # Data archive manager, mirror switching & downloader
 │   ├── docker_mgr.py           # Docker execution engine & architecture detector
 │   ├── scw_utils.py            # Science window parsing & pointing filter utilities
 │   ├── viewer.py               # FITS mosaic image viewer & statistics
-│   └── benchmark.py            # Cross-architecture benchmark suite
+│   └── benchmark.py            # Cross-architecture benchmark & run comparison suite
 ├── pipeline/                   # Distributed execution components
 │   ├── scw_distributor.py      # Multi-worker Science Window job distributor
 │   └── runner_scw.sh           # Per-ScW container execution wrapper script
@@ -198,14 +222,16 @@ docker build --platform linux/amd64 \
 │   ├── run_testdata_validation.py # Automated runner & per-HDU FITS scientific diff engine
 │   ├── scripts/                # Tailored container scripts for IBIS, JEM-X, OMC, SPI, PiCSIT
 │   └── README.md               # Full validation protocol, lineage, and replication guide
-├── tests/                      # Automated pytest suite (CLI, TUI, data, analysis)
+├── tests/                      # Automated pytest suite (CLI, TUI, data, analysis, cal)
 │   ├── test_analysis.py        # Pipeline invocation & energy band parsing tests
+│   ├── test_cal_profiles.py    # Calibration profile and rule constraint tests
 │   ├── test_cli.py             # Typer CLI smoke & help tests
 │   ├── test_config.py          # Configuration loading & override tests
 │   ├── test_data_mgr.py        # Data archive, mirror switching & download tests
 │   ├── test_scw_utils.py       # ScW spec & pointing filter tests
 │   └── test_tui.py             # Textual async pilot tests (forms, timing, collapse)
 ├── docs/                       # Technical publications & documentation
+│   ├── task_tracker.md         # Multi-machine task tracker & handover guide
 │   ├── technical_rebuild_arm64.md # MNRAS Techniques paper draft
 │   ├── status_report.md        # Calibration & background estimation status
 │   └── technical_roadmap.md    # Multi-phase development roadmap

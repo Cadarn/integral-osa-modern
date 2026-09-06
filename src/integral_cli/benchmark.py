@@ -8,6 +8,7 @@ Benchmarking suite for comparing INTEGRAL OSA execution across:
 import json
 import time
 from pathlib import Path
+from typing import Any
 
 import typer
 from astropy.io import fits
@@ -167,3 +168,173 @@ def run_benchmark(
         )
 
     console.print("\n", table)
+
+
+@benchmark_app.command("compare")
+def compare_runs(
+    run_a: Path = typer.Argument(..., help="Path to first observation run directory"),
+    run_b: Path = typer.Argument(..., help="Path to second observation run directory"),
+    label_a: str = typer.Option("Run A", "--label-a", help="Display label for Run A"),
+    label_b: str = typer.Option("Run B", "--label-b", help="Display label for Run B"),
+):
+    """Compare science results (detection significance, fluxes, coordinates) between two runs."""
+    import numpy as np
+
+    if not run_a.exists() or not run_b.exists():
+        console.print("[bold red]Error: Both run directories must exist.[/bold red]")
+        raise typer.Exit(code=1)
+
+    console.print(
+        Panel(
+            f"[bold green]INTEGRAL Cross-Run Calibration & Scientific Comparison[/bold green]\n\n"
+            f"• [cyan]{label_a}[/cyan]: {run_a}\n"
+            f"• [cyan]{label_b}[/cyan]: {run_b}",
+            title="Comparison Setup",
+        )
+    )
+
+    # Search for source results
+    res_candidates = [
+        ("IBIS", "isgri_srcl_res.fits", "isgri_mosa_res.fits"),
+        ("JEM-X", "jmx2_srcl_res.fits", "jmx2_obs_res.fits"),
+        ("SPI", "source_res.fits", "source_res.fits"),
+        ("OMC", "omc_srcl_res.fits", "omc_srcl_res.fits"),
+    ]
+
+    found = False
+    for instr, scw_res, obs_res in res_candidates:
+        f_a = list(run_a.rglob(f"*{obs_res}*")) or list(run_a.rglob(f"*{scw_res}*"))
+        f_b = list(run_b.rglob(f"*{obs_res}*")) or list(run_b.rglob(f"*{scw_res}*"))
+
+        if f_a and f_b:
+            found = True
+            try:
+                with fits.open(f_a[0]) as ha, fits.open(f_b[0]) as hb:
+                    # Find first HDU with source data table
+                    da = None
+                    db = None
+                    for h in ha:
+                        h_any: Any = h
+                        if (
+                            h_any.data is not None
+                            and getattr(h_any.data, "names", None)
+                            and ("NAME" in h_any.data.names or "OMC_ID" in h_any.data.names)
+                        ):
+                            da = h_any.data
+                            break
+                    for h in hb:
+                        h_any: Any = h
+                        if (
+                            h_any.data is not None
+                            and getattr(h_any.data, "names", None)
+                            and ("NAME" in h_any.data.names or "OMC_ID" in h_any.data.names)
+                        ):
+                            db = h_any.data
+                            break
+
+                    if da is None or db is None:
+                        continue
+                    name_col = (
+                        "NAME"
+                        if "NAME" in da.names
+                        else ("OMC_ID" if "OMC_ID" in da.names else None)
+                    )
+                    if not name_col:
+                        continue
+
+                    table = Table(
+                        title=f"{instr} Source Detection Comparison", title_style="bold cyan"
+                    )
+                    has_swid = "SWID" in da.names and "SWID" in db.names
+                    if has_swid:
+                        table.add_column("SWID", style="dim cyan")
+                    table.add_column("Source Identifier", style="bold yellow")
+                    has_detsig = "DETSIG" in da.names and "DETSIG" in db.names
+                    if has_detsig:
+                        table.add_column(f"{label_a} DetSig", justify="right", style="cyan")
+                        table.add_column(f"{label_b} DetSig", justify="right", style="magenta")
+                        table.add_column("Δ DetSig (σ)", justify="right", style="bold")
+                    has_flux = "FLUX" in da.names and "FLUX" in db.names
+                    if has_flux:
+                        table.add_column(f"{label_a} Flux", justify="right", style="dim")
+                        table.add_column(f"{label_b} Flux", justify="right", style="dim")
+                    has_mag = "MAG_V" in da.names and "MAG_V" in db.names
+                    if has_mag:
+                        table.add_column(f"{label_a} Mag (V)", justify="right", style="cyan")
+                        table.add_column(f"{label_b} Mag (V)", justify="right", style="magenta")
+                        table.add_column("Δ Mag", justify="right", style="bold")
+                    table.add_column("Offset (arcsec)", justify="right", style="green")
+
+                    def make_key(r, names, col=name_col):
+                        val = str(r[col]).strip()
+                        if "SWID" in names:
+                            return (str(r["SWID"]).strip(), val)
+                        return val
+
+                    sources_b = {make_key(r, db.names): r for r in db}
+                    for row_a in da:
+                        k_a = make_key(row_a, da.names)
+                        if k_a in sources_b:
+                            row_b = sources_b[k_a]
+                            s_name = str(row_a[name_col]).strip()
+                            sig_a = float(row_a["DETSIG"]) if has_detsig else 0.0
+                            sig_b = float(row_b["DETSIG"]) if has_detsig else 0.0
+                            delta_sig = sig_b - sig_a
+
+                            ra_a = float(row_a["RA_OBJ"]) if "RA_OBJ" in da.names else 0.0
+                            dec_a = float(row_a["DEC_OBJ"]) if "DEC_OBJ" in da.names else 0.0
+                            ra_b = float(row_b["RA_OBJ"]) if "RA_OBJ" in db.names else 0.0
+                            dec_b = float(row_b["DEC_OBJ"]) if "DEC_OBJ" in db.names else 0.0
+
+                            d_ra = (ra_b - ra_a) * np.cos(np.radians(dec_a)) * 3600.0
+                            d_dec = (dec_b - dec_a) * 3600.0
+                            offset = np.hypot(d_ra, d_dec)
+
+                            row_cells = []
+                            if has_swid:
+                                row_cells.append(str(row_a["SWID"]).strip())
+                            row_cells.append(s_name)
+                            if has_detsig:
+                                row_cells.extend(
+                                    [
+                                        f"{sig_a:.2f}σ",
+                                        f"{sig_b:.2f}σ",
+                                        f"{delta_sig:+.2f}σ",
+                                    ]
+                                )
+                            if has_flux:
+                                f_a_arr = np.atleast_1d(row_a["FLUX"])
+                                f_b_arr = np.atleast_1d(row_b["FLUX"])
+                                f_val_a = float(f_a_arr[0])
+                                f_val_b = float(f_b_arr[0])
+                                if "FLUX_ERR" in da.names:
+                                    f_err_a = float(np.atleast_1d(row_a["FLUX_ERR"])[0])
+                                else:
+                                    f_err_a = 0.0
+                                if "FLUX_ERR" in db.names:
+                                    f_err_b = float(np.atleast_1d(row_b["FLUX_ERR"])[0])
+                                else:
+                                    f_err_b = 0.0
+                                row_cells.append(f"{f_val_a:.2f}±{f_err_a:.2f}")
+                                row_cells.append(f"{f_val_b:.2f}±{f_err_b:.2f}")
+                            if has_mag:
+                                m_a = float(row_a["MAG_V"])
+                                m_b = float(row_b["MAG_V"])
+                                row_cells.extend(
+                                    [
+                                        f"{m_a:.3f}",
+                                        f"{m_b:.3f}",
+                                        f"{m_b - m_a:+.3f}",
+                                    ]
+                                )
+                            row_cells.append(f'{offset:.2f}"')
+                            table.add_row(*row_cells)
+
+                    console.print(table)
+            except Exception as e:
+                console.print(f"[dim yellow]Warning while comparing {instr}: {e}[/dim yellow]")
+
+    if not found:
+        console.print(
+            "[dim yellow]No standard source result tables found for automated comparison.[/dim yellow]"
+        )

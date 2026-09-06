@@ -7,6 +7,7 @@ from rich.console import Console
 
 from integral_cli.analysis import analysis_app
 from integral_cli.benchmark import benchmark_app
+from integral_cli.cal_cli import cal_app
 from integral_cli.data_mgr import data_app
 from integral_cli.docker_mgr import docker_app, docker_status
 from integral_cli.tui import launch_tui
@@ -24,6 +25,9 @@ app = typer.Typer(
 # Register Sub-apps
 app.add_typer(docker_app, name="docker", help="Manage & build Docker containers for local hardware")
 app.add_typer(data_app, name="data", help="Manage local observation data, imports, and downloads")
+app.add_typer(
+    cal_app, name="cal", help="Manage calibration profiles and historical replay environments"
+)
 app.add_typer(analysis_app, name="analyse", help="Execute science analysis pipelines (IBIS/JEM-X)")
 app.add_typer(
     view_app, name="view", help="Visualise and inspect FITS images, mosaics, and source lists"

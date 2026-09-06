@@ -30,3 +30,11 @@ commonlog.txt
 .vscode/
 .idea/
 validation_runs/
+ic_orig/
+.integral/
+
+# Local only
+local_docs/
+overleaf_cache/
+.claude/
+test_dataset/
