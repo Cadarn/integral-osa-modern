@@ -178,3 +178,33 @@ The automated IC index builder and pruner lives in `src/integral_cli/data_mgr.py
    Add `integral data calibration set-alias <ALIAS>` or `integral data calibration legacy-align` to automatically configure `ic_master_file.fits` for legacy test validation or modern science analysis.
 3. **Enhance `clean_ic_master_file`**:
    Extend `clean_ic_master_file` to inspect HDU 3 and ensure the active alias points to available files in the `ic/` subdirectories.
+
+---
+
+## 6. Glossary of Calibration Terms
+
+This glossary defines the Instrument Characteristics (IC) files and subsystems referenced in this guide. These files are essential for correcting raw telemetry data and are resolved by the OSA pipeline via the `ic_master_file.fits` lookup table.
+
+### IBIS/ISGRI
+- **`ISGR_EFFC_MOD` (Efficiency Model)**: Contains the energy-dependent efficiency of the ISGRI detector. Used during the binning step to create efficiency shadowgrams and recover the true source flux.
+- **`ISGR_MASK_MOD` (Mask Pattern)**: Defines the geometry of the coded mask (the pattern of open and opaque tungsten elements).
+- **`ISGR_DECO_MOD` (Decoding Pattern)**: The projected decoding array used to deconvolve the detector shadowgrams into sky images.
+- **`ISGR_GHOS_MOD` (Ghost Buster Model)**: Defines specific regions of the mask (e.g., areas with glue deposits) that are ignored to prevent the creation of "ghost" artifacts in deep images.
+- **`ISGR_GNRL_BTI` (General Bad Time Intervals)**: A table listing periods of anomalous instrument behavior (e.g., solar flares, VETO problems) that should be excluded from the analysis.
+- **`IBIS_VETO_MOD` (VETO Shield Model)**: Calibration data for the BGO anticoincidence shield, used to correct for VETO swapping and define anticoincidence logic.
+- **`ISGR_BACK_BKG` (Background Model)**: The instrument background array used to subtract the internal detector background from the observed counts.
+- **`ISGR_OFFS_MOD` (Offset/Gain Model)**: Contains linear gain and offset parameters for every pixel, essential for converting pulse height (PHA) to energy (keV).
+
+### JEM-X
+- **`JMX_IMOD_GRP` (Instrument Model Group)**: Contains the instrumental response and geometry models for the JEM-X detectors.
+- **`JMX_BPL_GRP` (Baseline Parameter Group)**: Contains the baseline calibration parameters used for energy reconstruction and charge collection corrections.
+
+### OMC
+- **`OMC_FLAT_CAL` (Flat-Field Calibration)**: A normalized image used to correct for the non-uniform response of the CCD pixels across the field of view.
+- **`OMC_PHOT_CAL` (Photometric Calibration)**: The calibration curve used to convert measured electron fluxes into standard Johnson V magnitudes.
+- **`OMC_DARK_CAL` (Dark Current Calibration)**: Contains the dark current, slope, and bias values used to remove electronic noise and thermal current.
+
+### SPI
+- **`SPI_FLAT_GRP` (Flat-Field Group)**: A set of pre-defined flat-field spectra (derived from empty-field observations) used to model the background of the SPI detectors.
+- **`SPI_IRF_GRP` (Instrument Response Function Group)**: Contains the RMFs (Redistribution Matrix Files) and ARFs (Ancillary Response Files) describing the instrument response.
+- **`SPI_COEF_CAL` (Calibration Coefficients)**: General calibration coefficients used for energy correction and gain stabilization of the Germanium detectors.

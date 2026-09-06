@@ -1,0 +1,56 @@
+"""
+Main entry point for the unified INTEGRAL OSA Typer CLI.
+"""
+
+import typer
+from rich.console import Console
+
+from integral.cli.cal_cli import cal_app
+from integral.cli.tui.app import launch_tui
+from integral.core.data import data_app
+from integral.core.docker import docker_app, docker_status
+from integral.instruments.analysis import analysis_app
+from integral.validation.benchmark import benchmark_app
+from integral.validation.compare import compare as validate_cmd
+from integral.viewer.fits_view import view_app
+
+console = Console()
+
+app = typer.Typer(
+    name="integral",
+    help="INTEGRAL OSA Local Analysis & Container Management CLI",
+    no_args_is_help=True,
+)
+
+# Register Sub-apps
+app.add_typer(docker_app, name="docker", help="Manage & build Docker containers for local hardware")
+app.add_typer(data_app, name="data", help="Manage local observation data, imports, and downloads")
+app.add_typer(
+    cal_app, name="cal", help="Manage calibration profiles and historical replay environments"
+)
+app.add_typer(
+    analysis_app, name="analyse", help="Execute science analysis pipelines (IBIS/JEM-X/OMC/SPI)"
+)
+app.add_typer(
+    view_app, name="view", help="Visualise and inspect FITS images, mosaics, and source lists"
+)
+app.add_typer(
+    benchmark_app, name="benchmark", help="Run performance benchmarks and multi-tier comparisons"
+)
+
+# Top level convenience commands
+app.command("status")(docker_status)
+app.command("validate")(validate_cmd)
+app.command("tui", help="Launch the interactive terminal UI for configuring and running analyses")(
+    launch_tui
+)
+
+
+@app.command("info")
+def show_info():
+    """Display overall system architecture, paths, and Docker configuration."""
+    docker_status()
+
+
+if __name__ == "__main__":
+    app()
