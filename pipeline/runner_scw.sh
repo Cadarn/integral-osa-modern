@@ -5,6 +5,7 @@
 # ==============================================================================
 
 set -euo pipefail
+ulimit -s unlimited || true
 
 echo "============================================================"
 echo "Starting INTEGRAL Science Window Processing Job"
