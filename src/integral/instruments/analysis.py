@@ -14,7 +14,7 @@ from rich.prompt import Confirm, Prompt
 
 from integral.core.config import config
 from integral.core.docker import run_container
-from integral.core.scw import filter_pointing_scws
+from integral.core.scw import filter_pointing_scws, validate_scws_have_data
 
 console = Console()
 analysis_app = typer.Typer(help="Run INTEGRAL scientific reduction pipelines and benchmarks")
@@ -411,6 +411,21 @@ def run_ibis(
 
     scws = _resolve_scw_ids(scw_input)
 
+    # Validate that ScWs contain valid science telemetry (e.g. isgri_events.fits)
+    # to prevent ii_skyimage mosaicking segfaults on unobserved/aborted pointings
+    valid_scws, dropped_scws = validate_scws_have_data(
+        scws, config.rep_base_prod, instrument="IBIS"
+    )
+    if dropped_scws:
+        console.print(
+            Panel(
+                f"[yellow]Notice: Filtered out {len(dropped_scws)} unobserved or empty Science Window(s) lacking event data:[/yellow]\n"
+                f"[dim]{', '.join(dropped_scws[:8])}{'...' if len(dropped_scws) > 8 else ''}[/dim]",
+                title="Data Integrity Guard",
+            )
+        )
+    scws = valid_scws
+
     if not scws:
         console.print("[bold red]No valid Science Windows found for analysis.[/bold red]")
         raise typer.Exit(code=1)
@@ -478,6 +493,7 @@ def run_ibis(
 
     bash_pipeline = f"""
     set -e
+    ulimit -s unlimited || true
     [ -f /init.sh ] && source /init.sh 2>/dev/null || true
     [ -f /opt/osa/bin/isdc_init_env.sh ] && source /opt/osa/bin/isdc_init_env.sh 2>/dev/null || true
 
@@ -604,6 +620,25 @@ def run_jemx(
 
     scws = _resolve_scw_ids(scw_input)
 
+    valid_scws, dropped_scws = validate_scws_have_data(
+        scws, config.rep_base_prod, instrument=f"JEMX{jemx_unit}"
+    )
+    if dropped_scws:
+        console.print(
+            Panel(
+                f"[yellow]Notice: Filtered out {len(dropped_scws)} unobserved or empty Science Window(s) lacking JEM-X {jemx_unit} event data:[/yellow]\n"
+                f"[dim]{', '.join(dropped_scws[:8])}{'...' if len(dropped_scws) > 8 else ''}[/dim]",
+                title="Data Integrity Guard",
+            )
+        )
+    scws = valid_scws
+
+    if not scws:
+        console.print(
+            f"[bold red]No valid Science Windows found with JEM-X {jemx_unit} data.[/bold red]"
+        )
+        raise typer.Exit(code=1)
+
     formatted_scws = [f"{s}.001" if (len(s) == 12 and not s.endswith(".001")) else s for s in scws]
     scw_file.write_text("\n".join(formatted_scws) + "\n")
 
@@ -626,6 +661,7 @@ def run_jemx(
     inst_name = f"JMX{jemx_unit}"
     bash_pipeline = f"""
     set -e
+    ulimit -s unlimited || true
     [ -f /init.sh ] && source /init.sh 2>/dev/null || true
     [ -f /opt/osa/bin/isdc_init_env.sh ] && source /opt/osa/bin/isdc_init_env.sh 2>/dev/null || true
 
