@@ -3,20 +3,24 @@
 Supports:
 - Packaging minimal IC + index + catalog trees per instrument (IBIS, JEM-X, OMC, SPI)
 - Calibration profile selection ('latest' gold standard, 'esa-2022' legacy, or custom)
+- Automatic detection of IC release dates from master index headers (e.g. ic202505)
+- Deterministic calibration content hashing for cryptographic reproducibility
 - Multi-architecture base images (native ARM64 vs modern amd64)
-- Structured versioned tagging (e.g. 11.2-latest-arm64, 11.2-esa2022-amd64)
+- Structured semantic tagging (e.g. 11.2-ic202505-arm64-ibis, 11.2-esa2022-amd64-jemx)
 - Optional Docker build and push commands with safety checks for registry credentials
 """
 
 from __future__ import annotations
 
 import datetime
+import hashlib
 import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from astropy.io import fits
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -77,6 +81,42 @@ INSTRUMENT_SPECS: dict[str, InstrumentRequirements] = {
 }
 
 
+def detect_ic_release_tag(ic_archive_path: Path | None = None) -> str:
+    """Inspect master index and characterization headers to find the IC release date tag."""
+    archive = (ic_archive_path or config.current_ic).resolve()
+    master_path = archive / "idx" / "ic" / "ic_master_file.fits"
+
+    latest_date_str = ""
+    if master_path.exists():
+        try:
+            with fits.open(master_path) as hdul:
+                for ext in hdul:
+                    date_val = ext.header.get("DATE", "")
+                    if date_val and date_val > latest_date_str:
+                        latest_date_str = date_val
+        except Exception as e:
+            console.print(f"[dim]Note: could not read date from {master_path}: {e}[/dim]")
+
+    if latest_date_str and len(latest_date_str) >= 7:
+        # e.g. "2025-05-28T08:31:52" -> "ic202505"
+        clean_date = latest_date_str[:10].replace("-", "")
+        return f"ic{clean_date[:6]}"
+
+    # Fallback to year-month from current time if not found
+    return f"ic{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m')}"
+
+
+def compute_stage_content_digest(stage_dir: Path) -> str:
+    """Compute deterministic short SHA-256 digest of staged calibration files."""
+    files = sorted(stage_dir.rglob("*.fits"))
+    h = hashlib.sha256()
+    stride = max(1, len(files) // 30)
+    for f in files[::stride]:
+        size = f.stat().st_size
+        h.update(f"{f.name}:{size}".encode())
+    return h.hexdigest()[:8]
+
+
 def stage_instrument_calibration_tree(
     instrument: str,
     target_stage_dir: Path,
@@ -114,7 +154,11 @@ def stage_instrument_calibration_tree(
             copied_counts["ic_files"] += sum(1 for _ in dest_sub.rglob("*") if _.is_file())
 
     # 2. Copy filtered index directory
-    src_idx_dir = provisioned_ic / "idx" / "ic" if (provisioned_ic / "idx" / "ic").exists() else base_ic / "idx" / "ic"
+    src_idx_dir = (
+        provisioned_ic / "idx" / "ic"
+        if (provisioned_ic / "idx" / "ic").exists()
+        else base_ic / "idx" / "ic"
+    )
     if src_idx_dir.exists():
         # Always include ic_master_file.fits
         master_file = src_idx_dir / "ic_master_file.fits"
@@ -146,6 +190,7 @@ def stage_instrument_calibration_tree(
 def generate_instrument_dockerfile(
     instrument: str,
     base_image: str,
+    cal_label: str,
     profile_name: str,
 ) -> str:
     """Generate the self-contained Dockerfile content for an instrument with baked IC."""
@@ -155,7 +200,7 @@ def generate_instrument_dockerfile(
     dockerfile_content = f"""# syntax=docker/dockerfile:1
 # Dedicated {spec.display_name} Hermetic Analysis Container
 # Built on: {timestamp}
-# Calibration Profile: {profile_name}
+# Calibration Label: {cal_label} (Profile: {profile_name})
 # Base Image: {base_image}
 
 FROM {base_image}
@@ -163,6 +208,7 @@ FROM {base_image}
 LABEL maintainer="INTEGRAL Modernization Team <cadarn@github>"
 LABEL org.opencontainers.image.title="INTEGRAL OSA {spec.display_name} Container"
 LABEL org.opencontainers.image.description="Standalone {spec.display_name} pipeline container with baked IC calibration"
+LABEL org.opencontainers.image.calibration_label="{cal_label}"
 LABEL org.opencontainers.image.calibration_profile="{profile_name}"
 
 # Setup internal calibration and data mounts
@@ -191,27 +237,28 @@ CMD ["bash"]
 def construct_image_tags(
     instrument: str,
     registry_prefix: str,
-    profile_name: str,
+    cal_label: str,
     target_arch: str,
     tag_version: str = "11.2",
     date_tag: bool = False,
+    digest: str | None = None,
 ) -> list[str]:
     """Construct informative image tags instead of a naive 'latest' tag."""
-    # Tag structure:
-    # 1. {tag_version}-{profile}-{arch}-{instrument}
-    # 2. {tag_version}-{arch}-{instrument} (if profile is 'latest')
-    # 3. YYYYMMDD snapshot tag if date_tag is enabled
-    clean_profile = profile_name.replace("-", "")
-    base_tag = f"{tag_version}-{clean_profile}-{target_arch}-{instrument}"
+    clean_cal = cal_label.replace("_", "-").replace(" ", "-").lower()
 
-    tags = [f"{registry_prefix}:{base_tag}"]
+    # Primary scientific tag: {version}-{cal_label}-{arch}-{instrument}
+    # e.g. 11.2-ic202505-arm64-ibis or 11.2-esa2022-arm64-jemx
+    primary_tag = f"{registry_prefix}:{tag_version}-{clean_cal}-{target_arch}-{instrument}"
+    tags = [primary_tag]
 
-    if profile_name == "latest":
-        tags.append(f"{registry_prefix}:{tag_version}-{target_arch}-{instrument}")
+    # Content digest tag if available
+    if digest:
+        tags.append(f"{registry_prefix}:{tag_version}-ic-{digest}-{target_arch}-{instrument}")
 
+    # Explicit build date tag if requested
     if date_tag:
         dt_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d")
-        tags.append(f"{registry_prefix}:{tag_version}-{clean_profile}-{target_arch}-{instrument}-{dt_str}")
+        tags.append(f"{registry_prefix}:{tag_version}-{clean_cal}-{target_arch}-{instrument}-{dt_str}")
 
     return tags
 
@@ -220,9 +267,11 @@ def build_and_package_instrument(
     instrument: str,
     arch: str = "auto",
     profile: str = "latest",
+    cal_tag: str | None = None,
     registry: str = "cadarn/osa",
     version: str = "11.2",
     date_tag: bool = False,
+    include_digest: bool = True,
     output_dir: Path | None = None,
     dry_run: bool = False,
     push: bool = False,
@@ -231,7 +280,9 @@ def build_and_package_instrument(
     """Package calibration files and build/tag a dedicated instrument Docker image."""
     inst_key = instrument.lower()
     if inst_key not in INSTRUMENT_SPECS:
-        raise ValueError(f"Unsupported instrument '{instrument}'. Choose from: {list(INSTRUMENT_SPECS.keys())}")
+        raise ValueError(
+            f"Unsupported instrument '{instrument}'. Choose from: {list(INSTRUMENT_SPECS.keys())}"
+        )
 
     target_arch = config.host_arch if arch == "auto" else arch
     platform_arg = "--platform=linux/arm64" if target_arch == "arm64" else "--platform=linux/amd64"
@@ -243,24 +294,22 @@ def build_and_package_instrument(
         else "cadarn/osa:11-modern-amd64"
     )
 
-    build_tags = construct_image_tags(
-        instrument=inst_key,
-        registry_prefix=registry,
-        profile_name=profile,
-        target_arch=target_arch,
-        tag_version=version,
-        date_tag=date_tag,
-    )
+    # Determine calibration label
+    if cal_tag:
+        cal_label = cal_tag
+    elif profile == "latest":
+        cal_label = detect_ic_release_tag()
+    else:
+        cal_label = profile
 
-    stage_base = (output_dir or Path(f"/tmp/integral_pkg_{inst_key}_{profile}")).resolve()
+    stage_base = (output_dir or Path(f"/tmp/integral_pkg_{inst_key}_{cal_label}")).resolve()
+
     console.print(
         Panel(
             f"[bold green]Packaging Dedicated Container Image: {INSTRUMENT_SPECS[inst_key].display_name}[/bold green]\n\n"
             f"• Architecture:          [cyan]{target_arch}[/cyan] ({platform_arg})\n"
-            f"• Calibration Profile:   [cyan]{profile}[/cyan]\n"
+            f"• Calibration Label:     [bold yellow]{cal_label}[/bold yellow] (Profile: {profile})\n"
             f"• Base Image:            [cyan]{base_image}[/cyan]\n"
-            f"• Primary Image Tag:     [cyan]{build_tags[0]}[/cyan]\n"
-            f"• All Image Tags:        [cyan]{', '.join(build_tags)}[/cyan]\n"
             f"• Staging Path:          [cyan]{stage_base}[/cyan]",
             title="Instrument Package Configuration",
         )
@@ -277,11 +326,26 @@ def build_and_package_instrument(
         f"[green]✓ Staged {counts['ic_files']} IC files, {counts['idx_files']} index files, {counts['cat_files']} catalog files.[/green]"
     )
 
+    digest = compute_stage_content_digest(stage_base) if include_digest else None
+    if digest:
+        console.print(f"[dim]• Calibration Content Digest: [cyan]{digest}[/cyan][/dim]")
+
+    build_tags = construct_image_tags(
+        instrument=inst_key,
+        registry_prefix=registry,
+        cal_label=cal_label,
+        target_arch=target_arch,
+        tag_version=version,
+        date_tag=date_tag,
+        digest=digest,
+    )
+
     # 2. Write Dockerfile
     dockerfile_path = stage_base / f"Dockerfile.{inst_key}"
     df_content = generate_instrument_dockerfile(
         instrument=inst_key,
         base_image=base_image,
+        cal_label=cal_label,
         profile_name=profile,
     )
     with open(dockerfile_path, "w") as df:

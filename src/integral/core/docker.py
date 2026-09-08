@@ -222,6 +222,12 @@ def package_instrument_cmd(
         "-p",
         help="Calibration profile: 'latest' (modern dynamic) or 'esa-2022' (legacy testset)",
     ),
+    cal_tag: str | None = typer.Option(
+        None,
+        "--cal-tag",
+        "-c",
+        help="Explicit calibration label (e.g. ic202505, esa2022, bkg10). Defaults to detected release date.",
+    ),
     registry: str = typer.Option(
         "cadarn/osa",
         "--registry",
@@ -237,7 +243,12 @@ def package_instrument_cmd(
     date_tag: bool = typer.Option(
         False,
         "--date-tag",
-        help="Append an explicit YYYYMMDD date snapshot tag to the built images",
+        help="Append an explicit YYYYMMDD build snapshot tag to the built images",
+    ),
+    no_digest: bool = typer.Option(
+        False,
+        "--no-digest",
+        help="Do not append a content digest tag (hash of staged calibration files)",
     ),
     dry_run: bool = typer.Option(
         False,
@@ -275,9 +286,11 @@ def package_instrument_cmd(
             instrument=inst,
             arch=arch,
             profile=profile,
+            cal_tag=cal_tag,
             registry=registry,
             version=version,
             date_tag=date_tag,
+            include_digest=not no_digest,
             dry_run=dry_run,
             push=push,
             no_cache=no_cache,
