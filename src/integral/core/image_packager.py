@@ -153,25 +153,44 @@ def stage_instrument_calibration_tree(
             shutil.copytree(src_sub, dest_sub, symlinks=True)
             copied_counts["ic_files"] += sum(1 for _ in dest_sub.rglob("*") if _.is_file())
 
-    # 2. Copy filtered index directory
+    # 2. Copy index files and prune master file for this instrument
     src_idx_dir = (
         provisioned_ic / "idx" / "ic"
         if (provisioned_ic / "idx" / "ic").exists()
         else base_ic / "idx" / "ic"
     )
     if src_idx_dir.exists():
-        # Always include ic_master_file.fits
-        master_file = src_idx_dir / "ic_master_file.fits"
-        if master_file.exists():
-            shutil.copy2(master_file, stage_idx / "ic_master_file.fits")
-            copied_counts["idx_files"] += 1
+        for idx_f in src_idx_dir.glob("*.fits"):
+            dest_file = stage_idx / idx_f.name
+            if not dest_file.exists():
+                shutil.copy2(idx_f, dest_file)
+                copied_counts["idx_files"] += 1
 
-        for pattern in spec.idx_patterns:
-            for idx_f in src_idx_dir.glob(pattern):
-                dest_file = stage_idx / idx_f.name
-                if not dest_file.exists():
-                    shutil.copy2(idx_f, dest_file)
-                    copied_counts["idx_files"] += 1
+        # Prune ic_master_file.fits to keep only index members matching this instrument
+        stage_master = stage_idx / "ic_master_file.fits"
+        if stage_master.exists():
+            instrument_allow_prefixes = {
+                "ibis": ["IBIS", "ISGR", "PICS", "COMP", "GNRL", "INTL", "IREM"],
+                "jemx": ["JMX", "GNRL", "INTL", "IREM"],
+                "omc": ["OMC", "GNRL", "INTL"],
+                "spi": ["SPI", "GNRL", "INTL", "IREM"],
+            }
+            keep_prefixes = instrument_allow_prefixes.get(spec.name, [])
+            if keep_prefixes:
+                try:
+                    with fits.open(stage_master, mode="update") as m_hdul:
+                        if len(m_hdul) > 2 and m_hdul[2].data is not None:
+                            m_data = m_hdul[2].data
+                            if "MEMBER_LOCATION" in m_data.names:
+                                mask = [
+                                    any(str(loc).startswith(p) for p in keep_prefixes)
+                                    for loc in m_data["MEMBER_LOCATION"]
+                                ]
+                                import numpy as np
+                                m_hdul[2].data = m_data[np.array(mask)]
+                                m_hdul.flush()
+                except Exception as ex:
+                    console.print(f"[dim yellow]Warning: could not prune master index: {ex}[/dim yellow]")
 
     # 3. Copy required catalog directories
     src_cat_dir = provisioned_ic / "cat" if (provisioned_ic / "cat").exists() else base_ic / "cat"
