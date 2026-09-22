@@ -75,11 +75,21 @@ def test_generate_instrument_dockerfile():
 def test_stage_instrument_calibration_tree_and_digest():
     """Verify selective staging of IC trees and content digest."""
     with tempfile.TemporaryDirectory() as tmp_dir:
-        stage_path = Path(tmp_dir)
+        tmp_path = Path(tmp_dir)
+        source_ic = tmp_path / "source_ic"
+        (source_ic / "ic" / "omc").mkdir(parents=True)
+        (source_ic / "ic" / "omc" / "test_file.fits").write_text("mock fits data")
+        (source_ic / "idx" / "ic").mkdir(parents=True)
+        (source_ic / "idx" / "ic" / "ic_master_file.fits").write_text("mock master file")
+        (source_ic / "cat" / "hec").mkdir(parents=True)
+        (source_ic / "cat" / "hec" / "gnrl_refr_cat_0043.fits").write_text("mock catalog")
+
+        stage_path = tmp_path / "stage"
         counts = stage_instrument_calibration_tree(
             instrument="omc",
             target_stage_dir=stage_path,
             profile_name="latest",
+            source_ic_dir=source_ic,
         )
         assert (stage_path / "ic" / "omc").exists()
         assert (stage_path / "idx" / "ic" / "ic_master_file.fits").exists()
