@@ -11,10 +11,7 @@ Ephemeral EC2 Worker to run dal_dump / dal_list diagnostics directly inside
 the native ARM64 Docker container against S3-staged CALDB data.
 """
 import base64
-import json
-import os
-import sys
-import time
+
 import boto3
 
 AMI_ARM64 = "ami-08bb9a392e39dc6e6"  # AL2023 ARM64

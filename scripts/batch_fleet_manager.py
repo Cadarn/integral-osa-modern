@@ -21,8 +21,9 @@ Ensures aggregate vCPUs never exceed the 96 vCPU regional quota.
 import subprocess
 import sys
 import time
-import boto3
 from datetime import datetime, timezone
+
+import boto3
 from rich.console import Console
 
 console = Console()
@@ -58,9 +59,9 @@ def wait_for_instances_termination(instance_ids: list[str], poll_interval: int =
 
 def launch_and_manage():
     for idx, b in enumerate(BATCHES, 1):
-        console.print(f"\n[bold magenta]==================================================[/bold magenta]")
+        console.print("\n[bold magenta]==================================================[/bold magenta]")
         console.print(f"[bold green]Starting {b['name']}[/bold green]")
-        console.print(f"[bold magenta]==================================================[/bold magenta]")
+        console.print("[bold magenta]==================================================[/bold magenta]")
         
         cmd = [
             "uv", "run", "python", "scripts/run_aws_cloud_benchmark.py",
@@ -72,7 +73,7 @@ def launch_and_manage():
             "--spot",
         ]
         
-        p = subprocess.run(cmd, capture_output=True, text=True)
+        p = subprocess.run(cmd, capture_output=True, text=True, check=False)
         console.print(p.stdout)
         if p.returncode != 0:
             console.print(f"[bold red]Failed launching {b['name']}: {p.stderr}[/bold red]")

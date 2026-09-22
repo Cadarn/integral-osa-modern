@@ -16,11 +16,10 @@ Computes exact and projected costs for:
 4. EBS gp3 Root Volume Storage
 """
 
-from typing import Optional
+import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-import typer
 
 app = typer.Typer(help="AWS Cost Modeling Engine for INTEGRAL OSA")
 console = Console()

@@ -18,7 +18,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from astropy.io import fits
 from rich.console import Console
@@ -90,8 +90,10 @@ def detect_ic_release_tag(ic_archive_path: Path | None = None) -> str:
     if master_path.exists():
         try:
             with fits.open(master_path) as hdul:
-                for ext in hdul:
-                    date_val = ext.header.get("DATE", "")
+                hdul_any: Any = hdul
+                for ext in hdul_any:
+                    header: Any = getattr(ext, "header", {})
+                    date_val = str(header.get("DATE", ""))
                     if date_val and date_val > latest_date_str:
                         latest_date_str = date_val
         except Exception as e:
@@ -179,15 +181,16 @@ def stage_instrument_calibration_tree(
             if keep_prefixes:
                 try:
                     with fits.open(stage_master, mode="update") as m_hdul:
-                        if len(m_hdul) > 2 and m_hdul[2].data is not None:
-                            m_data = m_hdul[2].data
-                            if "MEMBER_LOCATION" in m_data.names:
+                        m_hdul_any: Any = m_hdul
+                        if len(m_hdul_any) > 2 and getattr(m_hdul_any[2], "data", None) is not None:
+                            m_data: Any = m_hdul_any[2].data
+                            if hasattr(m_data, "names") and "MEMBER_LOCATION" in m_data.names:
                                 mask = [
                                     any(str(loc).startswith(p) for p in keep_prefixes)
                                     for loc in m_data["MEMBER_LOCATION"]
                                 ]
                                 import numpy as np
-                                m_hdul[2].data = m_data[np.array(mask)]
+                                m_hdul_any[2].data = m_data[np.array(mask)]
                                 m_hdul.flush()
                 except Exception as ex:
                     console.print(f"[dim yellow]Warning: could not prune master index: {ex}[/dim yellow]")

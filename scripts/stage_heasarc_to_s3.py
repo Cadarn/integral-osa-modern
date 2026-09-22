@@ -15,18 +15,15 @@ aborted/empty pointings: 006000010010, 006001020010, 006001030010, 006001040010)
 into s3://<bucket>/rev0060/ for fast, internal AWS VPC transfers.
 """
 
-import io
 import re
-import sys
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Optional
 
 import boto3
+import typer
 from botocore.exceptions import ClientError
 from rich.console import Console
 from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TimeRemainingColumn
-import typer
 
 app = typer.Typer(help="Stage HEASARC INTEGRAL data into S3")
 console = Console()
@@ -82,7 +79,7 @@ def stage(
     bucket: str = typer.Option("integral-cloud-analysis-data-537472396676", "--bucket", "-b", help="Target S3 bucket name"),
     region: str = typer.Option("us-east-1", "--region", help="AWS Region"),
     max_workers: int = typer.Option(16, "--workers", "-w", help="Concurrent download threads"),
-    scw_limit: Optional[int] = typer.Option(None, "--limit", help="Limit number of ScWs (e.g. 10 or 25 for quick testing)"),
+    scw_limit: int | None = typer.Option(None, "--limit", help="Limit number of ScWs (e.g. 10 or 25 for quick testing)"),
 ):
     """Stage Rev 0060 Science Windows and auxiliary attitude data from HEASARC to S3."""
     s3 = boto3.client("s3", region_name=region)

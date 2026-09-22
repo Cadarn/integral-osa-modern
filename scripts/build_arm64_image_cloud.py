@@ -12,8 +12,8 @@ Zero secrets written to disk or logged.
 from __future__ import annotations
 
 import base64
+import contextlib
 import gzip
-import os
 import sys
 import time
 from pathlib import Path
@@ -46,10 +46,7 @@ def get_docker_token_from_env() -> str:
     with open(env_file, "r") as f:
         for line in f:
             line = line.strip()
-            if line.startswith("DOCKERHUB_TOKEN="):
-                token = line.split("=", 1)[1].strip().strip('"').strip("'")
-                break
-            elif line.startswith("DOCKER_HUB_TOKEN="):
+            if line.startswith(("DOCKERHUB_TOKEN=", "DOCKER_HUB_TOKEN=")):
                 token = line.split("=", 1)[1].strip().strip('"').strip("'")
                 break
 
@@ -225,10 +222,8 @@ def monitor_build(instance_id: str) -> bool:
 
     # Clean previous markers if any
     for k in [success_key, error_key]:
-        try:
+        with contextlib.suppress(Exception):
             s3.delete_object(Bucket=S3_BUCKET, Key=k)
-        except Exception:
-            pass
 
     console.print(Panel(
         f"[bold cyan]Monitoring Cloud Build on {instance_id}[/bold cyan]\n"

@@ -12,6 +12,7 @@ and stream full detailed stderr / stdout logs directly to S3.
 """
 import base64
 import gzip
+
 import boto3
 
 AMI_ARM64 = "ami-08bb9a392e39dc6e6"

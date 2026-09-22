@@ -19,19 +19,14 @@ with optional multi-instance parallel fleet execution, collects JSON results, an
 import base64
 import gzip
 import json
-import os
-import sys
-import time
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import boto3
+import typer
 from botocore.exceptions import ClientError
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
-import typer
 
 app = typer.Typer(help="AWS Cloud Benchmark Runner")
 console = Console()
@@ -70,8 +65,8 @@ def generate_user_data_script(
     arch: str,
     scale: str = "all",
     repeats: int = 1,
-    s3_bucket: Optional[str] = None,
-    repeat_idx: Optional[int] = None,
+    s3_bucket: str | None = None,
+    repeat_idx: int | None = None,
 ) -> str:
     """Generate the cloud-init bash script that runs autonomously on the EC2 instance."""
     image = CONTAINER_IMAGES[arch]
@@ -616,13 +611,13 @@ def run_cloud(
     scale: str = typer.Option("100", "--scale", "-s", help="Benchmark scale: '10', '25', '100' (full rev), or 'all'"),
     repeats: int = typer.Option(1, "--repeats", "-r", help="Sequential repeats per node (default: 1)"),
     parallel: int = typer.Option(3, "--parallel", "-p", help="Number of parallel spot instances to launch for fleet repeats (e.g. 3)"),
-    s3_bucket: Optional[str] = typer.Option("integral-cloud-analysis-data-537472396676", "--s3-bucket", "-b", help="S3 bucket with staged Rev 0060 data"),
+    s3_bucket: str | None = typer.Option("integral-cloud-analysis-data-537472396676", "--s3-bucket", "-b", help="S3 bucket with staged Rev 0060 data"),
     region: str = typer.Option("us-east-1", "--region", help="AWS region"),
     spot: bool = typer.Option(True, "--spot/--on-demand", help="Use Spot instances for ~70% cost savings"),
     volume_size: int = typer.Option(40, "--volume-size", help="Root EBS volume size in GB (recommended: 40 GB)"),
-    subnet_id: Optional[str] = typer.Option("subnet-a9e00af0", "--subnet-id", help="Subnet ID (default: us-east-1c subnet-a9e00af0)"),
-    iam_profile: Optional[str] = typer.Option("IntegralCloudBenchmarkProfile", "--iam-profile", help="IAM Instance Profile Name"),
-    node_indices: Optional[str] = typer.Option(None, "--node-indices", "-n", help="Specific comma-separated node indices to launch (e.g. '1,5')"),
+    subnet_id: str | None = typer.Option("subnet-a9e00af0", "--subnet-id", help="Subnet ID (default: us-east-1c subnet-a9e00af0)"),
+    iam_profile: str | None = typer.Option("IntegralCloudBenchmarkProfile", "--iam-profile", help="IAM Instance Profile Name"),
+    node_indices: str | None = typer.Option(None, "--node-indices", "-n", help="Specific comma-separated node indices to launch (e.g. '1,5')"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Render user-data script without launching"),
 ):
     """Launch AWS EC2 benchmark worker(s) for the specified architecture and scale."""
@@ -644,7 +639,7 @@ def run_cloud(
         nodes_to_launch = [int(x.strip()) for x in node_indices.split(",") if x.strip()]
         num_nodes = len(nodes_to_launch)
     else:
-        num_nodes = parallel if parallel >= 1 else 1
+        num_nodes = max(parallel, 1)
         nodes_to_launch = list(range(1, num_nodes + 1))
 
     console.print(

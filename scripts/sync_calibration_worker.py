@@ -18,15 +18,12 @@ Upon completion, the instance immediately self-terminates (shutdown -h now).
 """
 
 import base64
-import os
 import sys
-import time
-from typing import Optional
 
 import boto3
+import typer
 from rich.console import Console
 from rich.panel import Panel
-import typer
 
 app = typer.Typer(help="Launch Ephemeral EC2 Worker to Sync Calibration Data to S3")
 console = Console()
