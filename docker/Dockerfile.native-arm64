@@ -19,6 +19,7 @@ ENV TZ=UTC
 # ── System build dependencies ────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    python3 \
     gfortran \
     autoconf \
     automake \
@@ -118,7 +119,8 @@ RUN sed -i '/procName = '\''CleanStaInit'\''/a \ \ nullify(distance, pomx, pomy,
     sed -i '/call message(procname,'\'' Will not be treated'\'',0,Status)/a \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ Status = ISDC_OK' \
         /src/osa/analysis-sw/ibis/ii_skyimage/ii_skyimage_control.f90 && \
     sed -i 's/Real(KIND=4)  ,dimension(idim2,jdim2) :: filltab/Real(KIND=4) :: filltab/g' \
-        /src/osa/analysis-sw/ibis/ii_skyimage/ii_skyimage_atti.f90
+        /src/osa/analysis-sw/ibis/ii_skyimage/ii_skyimage_atti.f90 && \
+    python3 -c "import re; p='/src/osa/analysis-sw/ibis/ii_skyimage/ii_skyimage_atti.f90'; s=open(p).read(); rep='''If(((is==0).and.(i<=size(FilterImage,1)).and.(j<=size(FilterImage,2)).and.&\n                 (FilterImage(min(i,size(FilterImage,1)),min(j,size(FilterImage,2))))).or.&\n                ((is==1).and.(in<=size(FilterImage,1)).and.(jn<=size(FilterImage,2)).and.&\n                 (FilterImage(min(in,size(FilterImage,1)),min(jn,size(FilterImage,2))))))then'''; pat=re.compile(r'If\(\(\(is==0\)\.and\.\(FilterImage\(i,j\)\)\)\.or\.\s*&\s*\(\(is==1\)\.and\.\(FilterImage\(in,jn\)\)\)\)then', re.I); count=len(pat.findall(s)); s=pat.sub(rep, s); open(p,'w').write(s); print(f'Successfully patched {count} FilterImage bounds occurrences in ii_skyimage_atti.f90'); assert count==6"
 
 
 

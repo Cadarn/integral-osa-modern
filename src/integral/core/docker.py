@@ -200,3 +200,101 @@ def docker_status():
     table.add_row("IC Directory (CURRENT_IC)", str(config.current_ic))
 
     console.print(table)
+
+
+@docker_app.command("package")
+def package_instrument_cmd(
+    instrument: str = typer.Option(
+        "all",
+        "--instrument",
+        "-i",
+        help="Target instrument to package: ibis, jemx, omc, spi, or all",
+    ),
+    arch: str = typer.Option(
+        "auto",
+        "--arch",
+        "-a",
+        help="Architecture: auto, arm64 (Apple Silicon/Graviton), x86 (Intel/AMD)",
+    ),
+    profile: str = typer.Option(
+        "latest",
+        "--profile",
+        "-p",
+        help="Calibration profile: 'latest' (modern dynamic) or 'esa-2022' (legacy testset)",
+    ),
+    cal_tag: str | None = typer.Option(
+        None,
+        "--cal-tag",
+        "-c",
+        help="Explicit calibration label (e.g. ic202505, esa2022, bkg10). Defaults to detected release date.",
+    ),
+    registry: str = typer.Option(
+        "cadarn/osa",
+        "--registry",
+        "-r",
+        help="Docker image registry repository prefix (e.g. cadarn/osa or myuser/osa)",
+    ),
+    version: str = typer.Option(
+        "11.2",
+        "--version",
+        "-v",
+        help="Base OSA version prefix for tags (e.g. 11.2)",
+    ),
+    date_tag: bool = typer.Option(
+        False,
+        "--date-tag",
+        help="Append an explicit YYYYMMDD build snapshot tag to the built images",
+    ),
+    no_digest: bool = typer.Option(
+        False,
+        "--no-digest",
+        help="Do not append a content digest tag (hash of staged calibration files)",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Generate Dockerfiles and show build/push commands without running docker build",
+    ),
+    push: bool = typer.Option(
+        False,
+        "--push",
+        help="Directly push built images to registry (requires docker login)",
+    ),
+    no_cache: bool = typer.Option(
+        False,
+        "--no-cache",
+        help="Build images without using Docker layer cache",
+    ),
+):
+    """Package dedicated instrument Docker containers with baked-in IC calibration."""
+    from integral.core.image_packager import INSTRUMENT_SPECS, build_and_package_instrument
+
+    target_instruments = (
+        list(INSTRUMENT_SPECS.keys())
+        if instrument.lower() in ["all", "*"]
+        else [instrument.lower()]
+    )
+
+    for inst in target_instruments:
+        if inst not in INSTRUMENT_SPECS:
+            console.print(f"[bold red]Unknown instrument '{inst}'. Choose from: {list(INSTRUMENT_SPECS.keys())} or 'all'[/bold red]")
+            raise typer.Exit(code=1)
+
+    all_built_tags = []
+    for inst in target_instruments:
+        tags = build_and_package_instrument(
+            instrument=inst,
+            arch=arch,
+            profile=profile,
+            cal_tag=cal_tag,
+            registry=registry,
+            version=version,
+            date_tag=date_tag,
+            include_digest=not no_digest,
+            dry_run=dry_run,
+            push=push,
+            no_cache=no_cache,
+        )
+        all_built_tags.extend(tags)
+
+    console.print(f"\n[bold green]✓ Completed packaging {len(target_instruments)} instrument container(s)![/bold green]")
