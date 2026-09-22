@@ -51,7 +51,7 @@ AMI_MAP = {
 }
 
 INSTANCE_TYPES = {
-    "arm64": "c7g.xlarge",   # 4 vCPUs (Graviton3 Neoverse V1), 8 GB RAM
+    "arm64": "c7g.xlarge",  # 4 vCPUs (Graviton3 Neoverse V1), 8 GB RAM
     "x86_64": "c7i.xlarge",  # 4 vCPUs (Intel Xeon Sapphire Rapids), 8 GB RAM
 }
 
@@ -607,23 +607,56 @@ shutdown -h now
 
 @app.command()
 def run_cloud(
-    arch: str = typer.Option("arm64", "--arch", "-a", help="Target architecture ('arm64' or 'x86_64')"),
-    scale: str = typer.Option("100", "--scale", "-s", help="Benchmark scale: '10', '25', '100' (full rev), or 'all'"),
-    repeats: int = typer.Option(1, "--repeats", "-r", help="Sequential repeats per node (default: 1)"),
-    parallel: int = typer.Option(3, "--parallel", "-p", help="Number of parallel spot instances to launch for fleet repeats (e.g. 3)"),
-    s3_bucket: str | None = typer.Option("integral-cloud-analysis-data-537472396676", "--s3-bucket", "-b", help="S3 bucket with staged Rev 0060 data"),
+    arch: str = typer.Option(
+        "arm64", "--arch", "-a", help="Target architecture ('arm64' or 'x86_64')"
+    ),
+    scale: str = typer.Option(
+        "100", "--scale", "-s", help="Benchmark scale: '10', '25', '100' (full rev), or 'all'"
+    ),
+    repeats: int = typer.Option(
+        1, "--repeats", "-r", help="Sequential repeats per node (default: 1)"
+    ),
+    parallel: int = typer.Option(
+        3,
+        "--parallel",
+        "-p",
+        help="Number of parallel spot instances to launch for fleet repeats (e.g. 3)",
+    ),
+    s3_bucket: str | None = typer.Option(
+        "integral-cloud-analysis-data-537472396676",
+        "--s3-bucket",
+        "-b",
+        help="S3 bucket with staged Rev 0060 data",
+    ),
     region: str = typer.Option("us-east-1", "--region", help="AWS region"),
-    spot: bool = typer.Option(True, "--spot/--on-demand", help="Use Spot instances for ~70% cost savings"),
-    volume_size: int = typer.Option(40, "--volume-size", help="Root EBS volume size in GB (recommended: 40 GB)"),
-    subnet_id: str | None = typer.Option("subnet-a9e00af0", "--subnet-id", help="Subnet ID (default: us-east-1c subnet-a9e00af0)"),
-    iam_profile: str | None = typer.Option("IntegralCloudBenchmarkProfile", "--iam-profile", help="IAM Instance Profile Name"),
-    node_indices: str | None = typer.Option(None, "--node-indices", "-n", help="Specific comma-separated node indices to launch (e.g. '1,5')"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Render user-data script without launching"),
+    spot: bool = typer.Option(
+        True, "--spot/--on-demand", help="Use Spot instances for ~70% cost savings"
+    ),
+    volume_size: int = typer.Option(
+        40, "--volume-size", help="Root EBS volume size in GB (recommended: 40 GB)"
+    ),
+    subnet_id: str | None = typer.Option(
+        "subnet-a9e00af0", "--subnet-id", help="Subnet ID (default: us-east-1c subnet-a9e00af0)"
+    ),
+    iam_profile: str | None = typer.Option(
+        "IntegralCloudBenchmarkProfile", "--iam-profile", help="IAM Instance Profile Name"
+    ),
+    node_indices: str | None = typer.Option(
+        None,
+        "--node-indices",
+        "-n",
+        help="Specific comma-separated node indices to launch (e.g. '1,5')",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Render user-data script without launching"
+    ),
 ):
     """Launch AWS EC2 benchmark worker(s) for the specified architecture and scale."""
     arch = arch.lower()
     if arch not in ("arm64", "x86_64", "amd64"):
-        console.print(f"[bold red]Unsupported architecture: {arch}. Must be 'arm64' or 'x86_64'.[/bold red]")
+        console.print(
+            f"[bold red]Unsupported architecture: {arch}. Must be 'arm64' or 'x86_64'.[/bold red]"
+        )
         raise typer.Exit(1)
     if arch == "amd64":
         arch = "x86_64"
@@ -756,7 +789,9 @@ def run_cloud(
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "")
             if spot and ("Spot" in error_code or "InsufficientInstanceCapacity" in error_code):
-                console.print(f"[yellow]Spot unavailable ({error_code}). Falling back to On-Demand for Node {node_idx}...[/yellow]")
+                console.print(
+                    f"[yellow]Spot unavailable ({error_code}). Falling back to On-Demand for Node {node_idx}...[/yellow]"
+                )
                 launch_params.pop("InstanceMarketOptions", None)
                 try:
                     resp = ec2.run_instances(**launch_params)
@@ -767,7 +802,9 @@ def run_cloud(
                         f"[bold green]✓ Launched Node {node_idx}/{num_nodes}: {instance_id} ({instance_type} On-Demand)[/bold green]"
                     )
                 except Exception as fallback_e:
-                    console.print(f"[bold red]Failed to launch Node {node_idx} on-demand: {fallback_e}[/bold red]")
+                    console.print(
+                        f"[bold red]Failed to launch Node {node_idx} on-demand: {fallback_e}[/bold red]"
+                    )
                     break
             else:
                 console.print(f"[bold red]Failed to launch Node {node_idx}: {e}[/bold red]")
