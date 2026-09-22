@@ -10,6 +10,7 @@
 Targeted EC2 test worker to execute ibis_science_analysis on a single ScW (006000020010)
 and stream full detailed stderr / stdout logs directly to S3.
 """
+
 import base64
 import gzip
 
@@ -102,6 +103,7 @@ fi
 echo "=== Finished test run ==="
 """
 
+
 def main():
     ec2 = boto3.client("ec2", region_name="us-east-1")
     print("Launching test worker...")
@@ -115,17 +117,22 @@ def main():
         InstanceInitiatedShutdownBehavior="terminate",
         SubnetId="subnet-a9e00af0",
         IamInstanceProfile={"Name": "IntegralCloudBenchmarkProfile"},
-        BlockDeviceMappings=[{
-            "DeviceName": "/dev/xvda",
-            "Ebs": {"VolumeSize": 30, "VolumeType": "gp3", "DeleteOnTermination": True}
-        }],
-        TagSpecifications=[{
-            "ResourceType": "instance",
-            "Tags": [{"Key": "Name", "Value": "integral-scw-diagnostic"}]
-        }]
+        BlockDeviceMappings=[
+            {
+                "DeviceName": "/dev/xvda",
+                "Ebs": {"VolumeSize": 30, "VolumeType": "gp3", "DeleteOnTermination": True},
+            }
+        ],
+        TagSpecifications=[
+            {
+                "ResourceType": "instance",
+                "Tags": [{"Key": "Name", "Value": "integral-scw-diagnostic"}],
+            }
+        ],
     )
     inst_id = resp["Instances"][0]["InstanceId"]
     print(f"Launched test instance: {inst_id}")
+
 
 if __name__ == "__main__":
     main()

@@ -76,10 +76,14 @@ def sync_file_to_s3(s3_client, bucket: str, s3_key: str, src_url: str) -> bool:
 
 @app.command()
 def stage(
-    bucket: str = typer.Option("integral-cloud-analysis-data-537472396676", "--bucket", "-b", help="Target S3 bucket name"),
+    bucket: str = typer.Option(
+        "integral-cloud-analysis-data-537472396676", "--bucket", "-b", help="Target S3 bucket name"
+    ),
     region: str = typer.Option("us-east-1", "--region", help="AWS Region"),
     max_workers: int = typer.Option(16, "--workers", "-w", help="Concurrent download threads"),
-    scw_limit: int | None = typer.Option(None, "--limit", help="Limit number of ScWs (e.g. 10 or 25 for quick testing)"),
+    scw_limit: int | None = typer.Option(
+        None, "--limit", help="Limit number of ScWs (e.g. 10 or 25 for quick testing)"
+    ),
 ):
     """Stage Rev 0060 Science Windows and auxiliary attitude data from HEASARC to S3."""
     s3 = boto3.client("s3", region_name=region)
@@ -93,7 +97,9 @@ def stage(
         if region == "us-east-1":
             s3.create_bucket(Bucket=bucket)
         else:
-            s3.create_bucket(Bucket=bucket, CreateBucketConfiguration={"LocationConstraint": region})
+            s3.create_bucket(
+                Bucket=bucket, CreateBucketConfiguration={"LocationConstraint": region}
+            )
         console.print(f"[green]✓ Created S3 bucket: {bucket}[/green]")
 
     # 2. Plan files to sync
@@ -110,7 +116,9 @@ def stage(
     valid_scws = get_rev60_scws()
     if scw_limit:
         valid_scws = valid_scws[:scw_limit]
-    console.print(f"[green]Identified {len(valid_scws)} valid Science Windows (excluding aborted pointings).[/green]")
+    console.print(
+        f"[green]Identified {len(valid_scws)} valid Science Windows (excluding aborted pointings).[/green]"
+    )
 
     for scw in valid_scws:
         scw_url = f"https://heasarc.gsfc.nasa.gov/FTP/integral/data/scw/0060/{scw}.001/"
@@ -118,7 +126,9 @@ def stage(
         for sf in scw_files:
             tasks.append((f"rev0060/data/scw/0060/{scw}.001/{sf}", f"{scw_url}{sf}"))
 
-    console.print(f"[bold cyan]Total files to stage: {len(tasks)} across {len(valid_scws)} ScWs + Aux[/bold cyan]")
+    console.print(
+        f"[bold cyan]Total files to stage: {len(tasks)} across {len(valid_scws)} ScWs + Aux[/bold cyan]"
+    )
 
     # 3. Execute concurrent sync
     uploaded_count = 0

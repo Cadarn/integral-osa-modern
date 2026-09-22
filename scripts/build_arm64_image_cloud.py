@@ -198,16 +198,22 @@ def launch_builder_instance(user_data: str) -> str:
     try:
         resp = ec2.run_instances(**launch_params)
         inst_id = resp["Instances"][0]["InstanceId"]
-        console.print(f"[bold green]✓ Launched Graviton3 Spot Builder: {inst_id} ({INSTANCE_TYPE})[/bold green]")
+        console.print(
+            f"[bold green]✓ Launched Graviton3 Spot Builder: {inst_id} ({INSTANCE_TYPE})[/bold green]"
+        )
         return inst_id
     except ClientError as e:
         error_code = e.response.get("Error", {}).get("Code", "")
         if "Spot" in error_code or "InsufficientInstanceCapacity" in error_code:
-            console.print(f"[yellow]Spot unavailable ({error_code}). Falling back to On-Demand...[/yellow]")
+            console.print(
+                f"[yellow]Spot unavailable ({error_code}). Falling back to On-Demand...[/yellow]"
+            )
             launch_params.pop("InstanceMarketOptions", None)
             resp = ec2.run_instances(**launch_params)
             inst_id = resp["Instances"][0]["InstanceId"]
-            console.print(f"[bold green]✓ Launched Graviton3 On-Demand Builder: {inst_id} ({INSTANCE_TYPE})[/bold green]")
+            console.print(
+                f"[bold green]✓ Launched Graviton3 On-Demand Builder: {inst_id} ({INSTANCE_TYPE})[/bold green]"
+            )
             return inst_id
         raise
 
@@ -225,13 +231,15 @@ def monitor_build(instance_id: str) -> bool:
         with contextlib.suppress(Exception):
             s3.delete_object(Bucket=S3_BUCKET, Key=k)
 
-    console.print(Panel(
-        f"[bold cyan]Monitoring Cloud Build on {instance_id}[/bold cyan]\n"
-        f"• Compiling OSA 11.2 from source on 8 Graviton3 vCPUs\n"
-        f"• Expected duration: ~8-12 minutes\n"
-        f"• Result will be pushed directly to Docker Hub at 12.5 Gbps",
-        title="Build Monitor"
-    ))
+    console.print(
+        Panel(
+            f"[bold cyan]Monitoring Cloud Build on {instance_id}[/bold cyan]\n"
+            f"• Compiling OSA 11.2 from source on 8 Graviton3 vCPUs\n"
+            f"• Expected duration: ~8-12 minutes\n"
+            f"• Result will be pushed directly to Docker Hub at 12.5 Gbps",
+            title="Build Monitor",
+        )
+    )
 
     start_time = time.time()
     with Progress(
@@ -249,7 +257,9 @@ def monitor_build(instance_id: str) -> bool:
             # 1. Check for success marker
             try:
                 s3.head_object(Bucket=S3_BUCKET, Key=success_key)
-                progress.update(task, description="[green]Build and push succeeded! Fetching result...")
+                progress.update(
+                    task, description="[green]Build and push succeeded! Fetching result..."
+                )
                 return True
             except ClientError:
                 pass
@@ -277,7 +287,9 @@ def monitor_build(instance_id: str) -> bool:
             except Exception as e:
                 console.print(f"[dim yellow]Warning polling EC2: {e}[/dim yellow]")
 
-            progress.update(task, description=f"[cyan]Compiling & packaging... ({elapsed}s elapsed)")
+            progress.update(
+                task, description=f"[cyan]Compiling & packaging... ({elapsed}s elapsed)"
+            )
 
 
 def main() -> int:
@@ -293,7 +305,9 @@ def main() -> int:
         # Stage local Dockerfile.native-arm64 to S3
         s3 = boto3.client("s3", region_name=REGION)
         dockerfile_path = PROJECT_ROOT / "docker" / "Dockerfile.native-arm64"
-        console.print(f"Uploading {dockerfile_path} to s3://{S3_BUCKET}/build/Dockerfile.native-arm64...")
+        console.print(
+            f"Uploading {dockerfile_path} to s3://{S3_BUCKET}/build/Dockerfile.native-arm64..."
+        )
         s3.upload_file(str(dockerfile_path), S3_BUCKET, "build/Dockerfile.native-arm64")
         console.print("[green]✓ Staged Dockerfile.native-arm64 in S3[/green]")
 
@@ -307,15 +321,29 @@ def main() -> int:
         success = monitor_build(inst_id)
 
         if success:
-            console.print("[bold green]====================================================[/bold green]")
-            console.print("[bold green]✓ SUCCESS: Docker image cadarn/osa:11-native-arm64 pushed![/bold green]")
-            console.print("[bold green]====================================================[/bold green]")
+            console.print(
+                "[bold green]====================================================[/bold green]"
+            )
+            console.print(
+                "[bold green]✓ SUCCESS: Docker image cadarn/osa:11-native-arm64 pushed![/bold green]"
+            )
+            console.print(
+                "[bold green]====================================================[/bold green]"
+            )
             return 0
         else:
-            console.print("[bold red]====================================================[/bold red]")
-            console.print("[bold red]✗ FAILURE: Cloud build failed or terminated prematurely.[/bold red]")
-            console.print(f"[bold red]Check S3 error log: s3://{S3_BUCKET}/logs/docker_build_arm64_error.log[/bold red]")
-            console.print("[bold red]====================================================[/bold red]")
+            console.print(
+                "[bold red]====================================================[/bold red]"
+            )
+            console.print(
+                "[bold red]✗ FAILURE: Cloud build failed or terminated prematurely.[/bold red]"
+            )
+            console.print(
+                f"[bold red]Check S3 error log: s3://{S3_BUCKET}/logs/docker_build_arm64_error.log[/bold red]"
+            )
+            console.print(
+                "[bold red]====================================================[/bold red]"
+            )
             return 1
 
     finally:
