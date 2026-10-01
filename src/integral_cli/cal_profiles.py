@@ -184,3 +184,114 @@ def provision_profile_tree(profile: CalibrationProfile, base_archive: Path | Non
             console.print(f"[dim yellow]Warning: could not filter {rule.index}: {err}[/dim yellow]")
 
     return cal_cache_dir
+
+
+INSTRUMENT_SUBSYSTEMS: dict[str, list[str]] = {
+    "IBIS": ["IBIS", "ISGR", "PICS", "COMP", "GNRL", "INTL", "IREM"],
+    "ISGRI": ["IBIS", "ISGR", "PICS", "COMP", "GNRL", "INTL", "IREM"],
+    "JEMX": ["JMX1", "JMX2", "JEMX", "GNRL", "INTL"],
+    "JEMX1": ["JMX1", "JEMX", "GNRL", "INTL"],
+    "JEMX2": ["JMX2", "JEMX", "GNRL", "INTL"],
+    "SPI": ["SPI", "GNRL", "INTL"],
+    "OMC": ["OMC", "GNRL", "INTL"],
+}
+
+
+def resolve_ic_master_file(path: Path | None = None) -> Path:
+    """Resolve the location of ic_master_file.fits from config or standard locations."""
+    if path and path.exists():
+        return path
+    candidates = [
+        config.rep_base_prod / "idx" / "ic" / "ic_master_file.fits",
+        Path.home() / "experiments" / "integral_data_archive" / "idx" / "ic" / "ic_master_file.fits",
+        Path.home() / "science" / "integral_data_archive" / "idx" / "ic" / "ic_master_file.fits",
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    raise FileNotFoundError(
+        "Could not locate ic_master_file.fits. Please specify --master-file or configure rep_base_prod."
+    )
+
+
+def prune_ic_master(
+    master_file: Path | None = None,
+    instruments: list[str] | None = None,
+    backup: bool = True,
+) -> tuple[int, int, Path]:
+    """Prune ic_master_file.fits to keep only index members for selected instruments.
+
+    This resolves DAL error -2004 (DAL_FILE_NOT_ACCESSIBLE) which occurs when DAL validates
+    index members for instruments not staged in the local IC tree.
+
+    Returns:
+        tuple[int, int, Path]: (kept_rows, original_rows, master_file_path)
+    """
+    import numpy as np
+
+    target = resolve_ic_master_file(master_file)
+    bak = target.with_suffix(".fits.bak")
+
+    # If backup requested and no backup exists yet, create one (preserving the pristine original)
+    if backup and not bak.exists():
+        shutil.copy2(target, bak)
+
+    # Determine allowed prefixes
+    if not instruments:
+        # Auto-detect which instrument directories exist in ic/
+        ic_base = target.parent.parent.parent / "ic"
+        detected = []
+        if ic_base.exists():
+            for inst_dir in ic_base.iterdir():
+                if inst_dir.is_dir() and inst_dir.name.upper() in INSTRUMENT_SUBSYSTEMS:
+                    detected.append(inst_dir.name.upper())
+        instruments = detected if detected else ["IBIS"]
+
+    allowed_prefixes: set[str] = set()
+    for inst in instruments:
+        allowed_prefixes.update(INSTRUMENT_SUBSYSTEMS.get(inst.upper(), [inst.upper()]))
+
+    # Always ensure GNRL, INTL, IREM are kept
+    allowed_prefixes.update(["GNRL", "INTL", "IREM"])
+
+    with fits.open(target, mode="update") as hdul:
+        tbl_idx = None
+        for i, hdu in enumerate(hdul):
+            h: Any = hdu
+            if (
+                h.data is not None
+                and hasattr(h.data, "names")
+                and "MEMBER_LOCATION" in h.data.names
+            ):
+                tbl_idx = i
+                break
+
+        if tbl_idx is None:
+            raise ValueError(f"MEMBER_LOCATION column not found in {target}")
+
+        target_hdu: Any = hdul[tbl_idx]
+        m_data = target_hdu.data
+        orig_len = len(m_data)
+        mask = [
+            any(str(loc).startswith(p) for p in allowed_prefixes)
+            for loc in m_data["MEMBER_LOCATION"]
+        ]
+        target_hdu.data = m_data[np.array(mask)]
+        hdul.flush()
+
+    return sum(mask), orig_len, target
+
+
+def restore_ic_master(master_file: Path | None = None) -> tuple[Path, Path]:
+    """Restore ic_master_file.fits from its .bak backup.
+
+    Returns:
+        tuple[Path, Path]: (master_file_path, backup_path)
+    """
+    target = resolve_ic_master_file(master_file)
+    bak = target.with_suffix(".fits.bak")
+    if not bak.exists():
+        raise FileNotFoundError(f"No backup file found at {bak}")
+
+    shutil.copy2(bak, target)
+    return target, bak
