@@ -126,10 +126,23 @@ uv run integral cal provision esa-2022
 uv run integral cal create my-epoch-2015
 uv run integral cal create --from-file profile.json
 
+# Prune ic_master_file.fits when working with partial IC trees (resolves DAL error -2004)
+uv run integral cal prune-master
+# Or specify instruments explicitly:
+uv run integral cal prune-master --instruments ibis,jemx
+
+# Restore original master index from .bak at any time
+uv run integral cal restore-master
+
 # Cross-compare scientific source detections and astrometric offsets between two runs
 uv run integral benchmark compare ./runs/esa_ref ./runs/modern_arm64 \
     --label-a "ESA Ref 2022" --label-b "Modern ARM64"
 ```
+
+---
+
+### 7. Remote Linux & Cloud Benchmarking Guide
+For step-by-step instructions on setting up, syncing data, and running benchmarks on remote headless Linux nodes, workstations, or cloud instances (including `screen` session management, Docker verification, and Phase A/B matrix execution), see [**`remote_instructions.md`**](remote_instructions.md).
 
 ---
 
@@ -248,6 +261,7 @@ docker build --platform linux/amd64 \
 │   └── test_tui.py                 # Textual async pilot tests (forms, timing, collapse)
 ├── docs/                           # Technical publications & documentation
 │   ├── task_tracker.md             # Multi-machine task tracker & handover guide
+│   ├── remote_instructions.md      # Headless Linux & cloud benchmarking execution guide
 │   ├── calibration_modern_manifest.md # Complete specification of modern IC baselines
 │   ├── calibration_legacy_modifications.md # Step-by-step guide to legacy IC tree editing
 │   ├── technical_rebuild_arm64.md  # MNRAS Techniques paper draft
