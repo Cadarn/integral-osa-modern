@@ -18,6 +18,8 @@ from integral.core.calibration import (
     get_profile,
     list_profiles,
     provision_profile_tree,
+    prune_ic_master,
+    restore_ic_master,
     save_user_profile,
 )
 
@@ -178,3 +180,63 @@ def export_cmd(
         json.dump(prof.model_dump(), f, indent=2)
 
     console.print(f"[bold green]✓ Profile '{prof.name}' exported to {output}[/bold green]")
+
+
+@cal_app.command("prune-master")
+def prune_master_cmd(
+    instruments: str | None = typer.Option(
+        None,
+        "--instruments",
+        "-i",
+        help="Comma-separated instruments to retain (e.g. 'ibis' or 'ibis,jemx'). Auto-detects if omitted.",
+    ),
+    master_file: Path | None = typer.Option(
+        None,
+        "--master-file",
+        "-m",
+        help="Path to ic_master_file.fits. Auto-detects from config or archive if omitted.",
+    ),
+    backup: bool = typer.Option(
+        True,
+        "--backup/--no-backup",
+        help="Create a .bak copy of ic_master_file.fits before pruning.",
+    ),
+):
+    """Prune ic_master_file.fits to resolve DAL error -2004 for partial CALDB downloads."""
+    inst_list = [i.strip() for i in instruments.split(",")] if instruments else None
+    try:
+        kept, orig, target = prune_ic_master(
+            master_file=master_file, instruments=inst_list, backup=backup
+        )
+    except Exception as e:
+        console.print(f"[bold red]Error pruning master index: {e}[/bold red]")
+        raise typer.Exit(code=1)
+
+    console.print(
+        f"[bold green]✓ Master index pruned:[/bold green] [cyan]{target}[/cyan]\n"
+        f"  Kept [bold]{kept}[/bold] of [bold]{orig}[/bold] entries for instruments: "
+        f"[yellow]{', '.join(inst_list) if inst_list else 'auto-detected'}[/yellow]"
+    )
+    if backup:
+        console.print(f"  Backup saved to [dim]{target.with_suffix('.fits.bak')}[/dim]")
+
+
+@cal_app.command("restore-master")
+def restore_master_cmd(
+    master_file: Path | None = typer.Option(
+        None,
+        "--master-file",
+        "-m",
+        help="Path to ic_master_file.fits to restore. Auto-detects if omitted.",
+    ),
+):
+    """Restore ic_master_file.fits from its .bak backup."""
+    try:
+        target, bak = restore_ic_master(master_file=master_file)
+    except Exception as e:
+        console.print(f"[bold red]Error restoring master index: {e}[/bold red]")
+        raise typer.Exit(code=1)
+
+    console.print(
+        f"[bold green]✓ Master index restored:[/bold green] [cyan]{target}[/cyan] from [dim]{bak}[/dim]"
+    )
