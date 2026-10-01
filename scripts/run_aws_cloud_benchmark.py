@@ -67,10 +67,12 @@ def generate_user_data_script(
     repeats: int = 1,
     s3_bucket: str | None = None,
     repeat_idx: int | None = None,
+    instance_type: str | None = None,
 ) -> str:
     """Generate the cloud-init bash script that runs autonomously on the EC2 instance."""
     image = CONTAINER_IMAGES[arch]
     workdir_path = "/opt/integral_bench"
+    inst_tag = f"_{instance_type}" if instance_type else ""
 
     # Select target ScWs based on scale
     if scale == "2":
@@ -97,7 +99,7 @@ def generate_user_data_script(
     bench_plan_json = json.dumps(scw_benchmark_plan)
 
     rep_tag = f"_rep{repeat_idx}" if repeat_idx is not None else ""
-    result_filename = f"cloud_results_{arch}_{scale}{rep_tag}.json"
+    result_filename = f"cloud_results_{arch}{inst_tag}_{scale}{rep_tag}.json"
 
     script = f"""#!/bin/bash
 set -euxo pipefail
@@ -616,6 +618,7 @@ def run_cloud(
     spot: bool = typer.Option(True, "--spot/--on-demand", help="Use Spot instances for ~70% cost savings"),
     volume_size: int = typer.Option(40, "--volume-size", help="Root EBS volume size in GB (recommended: 40 GB)"),
     subnet_id: str | None = typer.Option("subnet-a9e00af0", "--subnet-id", help="Subnet ID (default: us-east-1c subnet-a9e00af0)"),
+    instance_type: str | None = typer.Option(None, "--instance-type", "-t", help="EC2 instance type override (default: c7g.xlarge for arm64, c7i.xlarge for x86_64)"),
     iam_profile: str | None = typer.Option("IntegralCloudBenchmarkProfile", "--iam-profile", help="IAM Instance Profile Name"),
     node_indices: str | None = typer.Option(None, "--node-indices", "-n", help="Specific comma-separated node indices to launch (e.g. '1,5')"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Render user-data script without launching"),
@@ -629,7 +632,7 @@ def run_cloud(
         arch = "x86_64"
 
     ami_id = AMI_MAP[arch]
-    instance_type = INSTANCE_TYPES[arch]
+    chosen_instance_type = instance_type if instance_type else INSTANCE_TYPES[arch]
     image = CONTAINER_IMAGES[arch]
 
     if subnet_id == "subnet-a9e00af0" and arch == "x86_64":
@@ -647,7 +650,7 @@ def run_cloud(
             f"[bold green]AWS EC2 INTEGRAL Benchmark Configuration[/bold green]\n\n"
             f"• Architecture:     [cyan]{arch}[/cyan]\n"
             f"• Scale:            [bold yellow]{scale} ScWs[/bold yellow]\n"
-            f"• EC2 Instance:     [bold yellow]{instance_type}[/bold yellow] (16 vCPU, 32 GB RAM)\n"
+            f"• EC2 Instance:     [bold yellow]{chosen_instance_type}[/bold yellow]\n"
             f"• Node Fleet Count: [bold magenta]{len(nodes_to_launch)} node(s) ({nodes_to_launch})[/bold magenta]\n"
             f"• Repeats per node: [cyan]{repeats}[/cyan]\n"
             f"• Total Repeats:    [bold cyan]{len(nodes_to_launch) * repeats} total run(s)[/bold cyan]\n"
@@ -668,6 +671,7 @@ def run_cloud(
             repeats=repeats,
             s3_bucket=s3_bucket,
             repeat_idx=nodes_to_launch[0] if nodes_to_launch else 1,
+            instance_type=chosen_instance_type,
         )
         console.print("[yellow]Dry Run: User Data bootstrap script (Node 1):[/yellow]")
         console.print(sample_user_data[:1200] + "\n...[truncated]...\n")
@@ -683,11 +687,12 @@ def run_cloud(
             repeats=repeats,
             s3_bucket=s3_bucket,
             repeat_idx=node_idx,
+            instance_type=chosen_instance_type,
         )
 
         launch_params: dict[str, Any] = {
             "ImageId": ami_id,
-            "InstanceType": instance_type,
+            "InstanceType": chosen_instance_type,
             "MinCount": 1,
             "MaxCount": 1,
             "UserData": base64.b64encode(gzip.compress(user_data.encode("utf-8"))).decode("ascii"),
@@ -751,7 +756,7 @@ def run_cloud(
             launched_instances.append(instance_id)
             mode_desc = "Spot" if spot else "On-Demand"
             console.print(
-                f"[bold green]✓ Launched Node {node_idx}/{num_nodes}: {instance_id} ({instance_type} {mode_desc})[/bold green]"
+                f"[bold green]✓ Launched Node {node_idx}/{num_nodes}: {instance_id} ({chosen_instance_type} {mode_desc})[/bold green]"
             )
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "")
@@ -764,7 +769,7 @@ def run_cloud(
                     instance_id = instance["InstanceId"]
                     launched_instances.append(instance_id)
                     console.print(
-                        f"[bold green]✓ Launched Node {node_idx}/{num_nodes}: {instance_id} ({instance_type} On-Demand)[/bold green]"
+                        f"[bold green]✓ Launched Node {node_idx}/{num_nodes}: {instance_id} ({chosen_instance_type} On-Demand)[/bold green]"
                     )
                 except Exception as fallback_e:
                     console.print(f"[bold red]Failed to launch Node {node_idx} on-demand: {fallback_e}[/bold red]")
