@@ -40,16 +40,82 @@ app = typer.Typer(help="Phase B Scaling Benchmark Suite")
 console = Console()
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-ARCHIVE_DIR = Path.home() / "science" / "integral_data_archive"
 OUTPUT_BASE = PROJECT_ROOT / "benchmark_runs" / "phase_b"
 
 ARM64_IMAGE = "cadarn/osa:11-native-arm64"
 X86_IMAGE = "cadarn/osa:11-modern-amd64"
 
 
-def get_rev60_pointing_scws() -> list[str]:
+def detect_host_hardware() -> dict[str, Any]:
+    """Dynamically detect host CPU model, core count, RAM, and OS."""
+    os_name = platform.system()
+    machine = platform.machine()
+    cores = os.cpu_count() or 1
+    cpu_model = "Unknown CPU"
+    total_ram_gb = 0.0
+
+    if os_name == "Darwin":
+        try:
+            out = subprocess.check_output(
+                ["sysctl", "-n", "machdep.cpu.brand_string"], text=True
+            ).strip()
+            cpu_model = out or "Apple Silicon"
+        except Exception:
+            cpu_model = "Apple Silicon"
+        try:
+            mem_bytes = int(
+                subprocess.check_output(["sysctl", "-n", "hw.memsize"], text=True).strip()
+            )
+            total_ram_gb = round(mem_bytes / (1024**3), 1)
+        except (subprocess.SubprocessError, ValueError):
+            total_ram_gb = 0.0
+    elif os_name == "Linux":
+        try:
+            with open("/proc/cpuinfo") as f:
+                for line in f:
+                    if "model name" in line:
+                        cpu_model = line.split(":", 1)[1].strip()
+                        break
+        except (OSError, UnicodeDecodeError):
+            cpu_model = platform.processor() or "Linux x86_64"
+        try:
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if "MemTotal" in line:
+                        kb = int(line.split()[1])
+                        total_ram_gb = round(kb / (1024**2), 1)
+                        break
+        except (OSError, ValueError):
+            total_ram_gb = 0.0
+
+    return {
+        "cpu": cpu_model,
+        "cores": cores,
+        "ram_gb": total_ram_gb,
+        "os": f"{os_name} {platform.release()}",
+        "machine": machine,
+    }
+
+
+def resolve_archive_dir(override: Path | None = None) -> Path:
+    """Find the science archive directory across common paths."""
+    if override and override.exists():
+        return override
+    candidates = [
+        Path.home() / "experiments" / "integral_data_archive",
+        Path.home() / "science" / "integral_data_archive",
+        Path.home() / "integral_data_archive",
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    return candidates[0]
+
+
+def get_rev60_pointing_scws(archive_dir: Path | None = None) -> list[str]:
     """Retrieve all valid pointing ScWs (ending in 0010) for Rev 0060 that have event data."""
-    scw_dir = ARCHIVE_DIR / "scw" / "0060"
+    base = resolve_archive_dir(archive_dir)
+    scw_dir = base / "scw" / "0060"
     if not scw_dir.exists():
         raise FileNotFoundError(f"Revolution 0060 directory not found at {scw_dir}")
 
@@ -63,7 +129,7 @@ def get_rev60_pointing_scws() -> list[str]:
     pointings = filter_pointing_scws(all_ids, "0060")
 
     # Filter for complete ScWs with valid isgri_events.fits to prevent mosaic crashes on unobserved/aborted pointings
-    valid_pointings, _dropped = validate_scws_have_data(pointings, ARCHIVE_DIR, instrument="IBIS")
+    valid_pointings, _dropped = validate_scws_have_data(pointings, base, instrument="IBIS")
     return valid_pointings
 
 
@@ -137,6 +203,7 @@ def run_single_benchmark(
     arch_label: str,
     run_id: str,
     workdir: Path,
+    archive_dir: Path,
 ) -> dict[str, Any]:
     """Execute a single IBIS pipeline run and return performance and scientific metrics."""
     if workdir.exists():
@@ -169,10 +236,10 @@ def run_single_benchmark(
     export COMMONLOGFILE=+/home/integral/commonlog.txt
     export DISPLAY=""
 
-    # In x86 emulation, ensure CentOS system glibc/libstdc++ and ROOT are prioritized
-    if [[ "{arch_label}" == *"x86"* ]]; then
+    # In x86 emulation or legacy container, ensure CentOS system glibc/libstdc++ and ROOT are prioritized
+    if [[ "{arch_label}" == *"x86"* ]] && [ -d /opt/osa/root ]; then
         export ROOTSYS=/opt/osa/root
-        export LD_LIBRARY_PATH="/opt/osa/root/lib:/opt/osa/lib:/usr/lib64:/lib64"
+        export LD_LIBRARY_PATH="/opt/osa/root/lib:/opt/osa/lib:/usr/lib64:/lib64:$LD_LIBRARY_PATH"
     fi
 
     cd /home/integral
@@ -218,21 +285,23 @@ def run_single_benchmark(
         "docker",
         "run",
         "--rm",
+        "--ulimit",
+        "stack=-1:-1",
         *platform_arg,
         "-u",
         f"{uid}:{gid}",
         "-v",
         f"{workdir}:/home/integral",
         "-v",
-        f"{ARCHIVE_DIR}/scw:/data/scw",
+        f"{archive_dir}/scw:/data/scw",
         "-v",
-        f"{ARCHIVE_DIR}/aux:/data/aux",
+        f"{archive_dir}/aux:/data/aux",
         "-v",
-        f"{ARCHIVE_DIR}/ic:/data/ic",
+        f"{archive_dir}/ic:/data/ic",
         "-v",
-        f"{ARCHIVE_DIR}/idx:/data/idx",
+        f"{archive_dir}/idx:/data/idx",
         "-v",
-        f"{ARCHIVE_DIR}/cat:/data/cat",
+        f"{archive_dir}/cat:/data/cat",
         "-e",
         "HOME=/home/integral",
         image,
@@ -287,22 +356,36 @@ def run(
     archs: str = typer.Option(
         "arm64,x86", "--archs", "-a", help="Architectures to test: 'arm64', 'x86', or 'arm64,x86'"
     ),
+    archive_dir: Path | None = typer.Option(
+        None, "--archive-dir", "-d", help="Path to science data archive directory"
+    ),
+    s3_bucket: str | None = typer.Option(
+        None, "--s3-bucket", "-b", help="S3 bucket to upload benchmark results to"
+    ),
     output_file: Path = typer.Option(
         OUTPUT_BASE / "scaling_results.json", "--output", "-o", help="JSON output path"
     ),
 ):
     """Execute Phase B scaling benchmark matrix and output comprehensive results."""
-    all_pointings = get_rev60_pointing_scws()
+    archive_path = resolve_archive_dir(archive_dir)
+    all_pointings = get_rev60_pointing_scws(archive_path)
     total_pointings = len(all_pointings)
+
+    hw = detect_host_hardware()
+    ram_str = f", {hw['ram_gb']} GB RAM" if hw["ram_gb"] > 0 else ""
+    host_is_arm = hw["machine"].lower() in ("arm64", "aarch64")
 
     console.print(
         Panel(
             f"[bold magenta]INTEGRAL OSA Phase B Scaling Benchmark[/bold magenta]\n\n"
             f"• Dataset:             Rev 0060 ({total_pointings} pointing ScWs available)\n"
+            f"• Archive Path:        {archive_path}\n"
             f"• Test Sizes:          {sizes}\n"
             f"• Repeats per cell:    {repeats}\n"
             f"• Architectures:       {archs}\n"
-            f"• Host Machine:        Apple M4 Pro (macOS {platform.mac_ver()[0]}, 48 GB Unified Memory)\n"
+            f"• Host Machine:        {hw['cpu']} ({hw['os']}, {hw['cores']} cores{ram_str})\n"
+            f"• Host Architecture:   {hw['machine']} (mode: {'ARM64-native' if host_is_arm else 'x86_64-native'})\n"
+            f"• S3 Destination:      {f's3://{s3_bucket}/results/' if s3_bucket else 'Disabled (local only)'}\n"
             f"• Output File:         {output_file}",
             title="Benchmark Plan",
         )
@@ -324,19 +407,14 @@ def run(
         try:
             with open(output_file, "r") as f_in:
                 existing = json.load(f_in)
-                # Keep non-overlapping cells or allow appending
                 results_data = existing
                 results_data["metadata"]["date"] = datetime.now(timezone.utc).isoformat()
+                results_data["metadata"]["host"] = hw
         except Exception:
             results_data = {
                 "metadata": {
                     "date": datetime.now(timezone.utc).isoformat(),
-                    "host": {
-                        "cpu": "Apple M4 Pro",
-                        "cores": os.cpu_count(),
-                        "os": f"macOS {platform.mac_ver()[0]}",
-                        "machine": platform.machine(),
-                    },
+                    "host": hw,
                     "energy_band": "18-60 keV",
                     "instrument": "IBIS/ISGRI",
                     "repeats": repeats,
@@ -347,12 +425,7 @@ def run(
         results_data = {
             "metadata": {
                 "date": datetime.now(timezone.utc).isoformat(),
-                "host": {
-                    "cpu": "Apple M4 Pro",
-                    "cores": os.cpu_count(),
-                    "os": f"macOS {platform.mac_ver()[0]}",
-                    "machine": platform.machine(),
-                },
+                "host": hw,
                 "energy_band": "18-60 keV",
                 "instrument": "IBIS/ISGRI",
                 "repeats": repeats,
@@ -368,7 +441,11 @@ def run(
 
         for arch in arch_list:
             image = ARM64_IMAGE if arch == "arm64" else X86_IMAGE
-            arch_label = "Native ARM64" if arch == "arm64" else "Emulated x86_64"
+            if arch == "arm64":
+                arch_label = "Native ARM64" if host_is_arm else "Emulated ARM64"
+            else:
+                arch_label = "Emulated x86_64" if host_is_arm else "Native x86_64"
+
             timings = []
             runs = []
 
@@ -382,6 +459,7 @@ def run(
                     arch_label=arch_label,
                     run_id=run_id,
                     workdir=workdir,
+                    archive_dir=archive_path,
                 )
                 runs.append(res)
                 if res.get("success"):
@@ -428,7 +506,6 @@ def run(
         mean_t = cell["mean_seconds"]
         std_t = cell["std_seconds"]
         per_scw = mean_t / cell["scw_count"] if cell["scw_count"] > 0 else 0.0
-        # Get source stats from first successful run
         top_name = "-"
         top_sig = 0.0
         for r in cell["runs"]:
@@ -452,6 +529,17 @@ def run(
     console.print(
         f"\n[bold green]✓ Phase B Benchmark complete! Full structured results saved to {output_file}[/bold green]"
     )
+
+    if s3_bucket:
+        try:
+            s3_dest = f"s3://{s3_bucket}/results/{output_file.name}"
+            console.print(f"[cyan]Uploading results to {s3_dest}...[/cyan]")
+            subprocess.run(["aws", "s3", "cp", str(output_file), s3_dest], check=True)
+            console.print(
+                f"[bold green]✓ Benchmark results successfully uploaded to {s3_dest}[/bold green]"
+            )
+        except Exception as e:
+            console.print(f"[bold red]Failed to upload to S3: {e}[/bold red]")
 
 
 if __name__ == "__main__":
