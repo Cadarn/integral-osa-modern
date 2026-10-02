@@ -4,13 +4,20 @@
 
 This document outlines the cloud infrastructure architecture, operational strategy, execution timeline, and cost model for reducing the entire 22-year archival science legacy of the **INTEGRAL** space observatory using the modernized **OSA 11.2** containerized analysis pipeline.
 
-Using empirical benchmarks gathered from production AWS EC2 deployments (`c7i.xlarge` Intel Sapphire Rapids and `c7g.xlarge` AWS Graviton3), an ephemeral S3 rolling-buffer staging architecture, and verified AWS service quotas:
+Using empirical benchmarks gathered from production AWS EC2 deployments (`c7i.xlarge` Intel Sapphire Rapids, `c7a.xlarge` AMD Genoa, `c8g.xlarge` AWS Graviton4, and `c7g.xlarge` AWS Graviton3), an ephemeral S3 rolling-buffer staging architecture, and verified AWS service quotas:
 * **Total Archival Volume**: **2,886 revolutions** comprising approximately **131,000 Science Windows (ScWs)** (~7.73 TB compressed telemetry).
-* **Wall-Clock Time for Full Archive (Single Energy Band)**: **8.1 to 12.9 hours** on modern x86_64 (or **11.0 hours** on Graviton3 ARM64) under a standard 96-vCPU Spot fleet.
-* **Total Compute Cost (Single Energy Band)**: **$22.06 to $43.81** on EC2 Spot instances ($55.69 on On-Demand).
+* **Wall-Clock Time for Full Archive (Single Energy Band)**: **8.1 to 12.9 hours** on Intel Xeon (`c7i`), **9.9 to 15.8 hours** on AMD EPYC (`c7a`), or **9.4 to 15.0 hours** on Graviton4 (`c8g`) under a standard 96-vCPU Spot fleet.
+* **Total Compute Cost (Single Energy Band)**: **$20.80 to $43.81** on EC2 Spot instances ($52.40 to $55.69 on On-Demand). Specifically:
+  * **AMD EPYC Genoa (`c7a`)**: **$20.84** packed Spot ($41.48 1-node/rev Spot).
+  * **Intel Xeon Sapphire Rapids (`c7i`)**: **$22.06** packed Spot ($43.81 1-node/rev Spot).
+  * **AWS Graviton4 (`c8g`)**: **$22.99** packed Spot ($45.68 1-node/rev Spot).
+* **Total Electrical Energy Consumed (Single Energy Band)**:
+  * **AWS Graviton4 (`c8g`)**: **27.0 kWh** (44.4% less energy than Intel Xeon).
+  * **AWS AMD EPYC (`c7a`)**: **45.5 kWh**.
+  * **AWS Intel Xeon (`c7i`)**: **48.6 kWh**.
 * **Ephemeral S3 Buffer & Request Overhead**: **$37.33** one-off.
-* **Total End-to-End Mission Cost (Single Band)**: **~$59 to $81**.
-* **Canonical 4-Band Spectral Survey (20–40, 40–100, 100–200, 200–600 keV)**: **~$125 to $210** completed in **~1.5 to 2 days**.
+* **Total End-to-End Mission Cost (Single Band)**: **~$58 to $83**.
+* **Canonical 4-Band Spectral Survey (20–40, 40–100, 100–200, 200–600 keV)**: **~$120 to $210** completed in **~1.5 to 2 days**.
 
 ---
 
