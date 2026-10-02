@@ -10,6 +10,7 @@
 Ephemeral EC2 Worker to run dal_dump / dal_list diagnostics directly inside
 the native ARM64 Docker container against S3-staged CALDB data.
 """
+
 import base64
 
 import boto3
@@ -73,6 +74,7 @@ docker run --rm \\
 echo "=== Diagnostics complete ==="
 """
 
+
 def main():
     ec2 = boto3.client("ec2", region_name="us-east-1")
     print("Launching ARM64 diagnostic instance...")
@@ -92,17 +94,22 @@ def main():
                 "InstanceInterruptionBehavior": "terminate",
             },
         },
-        BlockDeviceMappings=[{
-            "DeviceName": "/dev/xvda",
-            "Ebs": {"VolumeSize": 20, "VolumeType": "gp3", "DeleteOnTermination": True}
-        }],
-        TagSpecifications=[{
-            "ResourceType": "instance",
-            "Tags": [{"Key": "Name", "Value": "integral-dal-diagnostic"}]
-        }]
+        BlockDeviceMappings=[
+            {
+                "DeviceName": "/dev/xvda",
+                "Ebs": {"VolumeSize": 20, "VolumeType": "gp3", "DeleteOnTermination": True},
+            }
+        ],
+        TagSpecifications=[
+            {
+                "ResourceType": "instance",
+                "Tags": [{"Key": "Name", "Value": "integral-dal-diagnostic"}],
+            }
+        ],
     )
     inst_id = resp["Instances"][0]["InstanceId"]
     print(f"Launched diagnostic instance: {inst_id}")
+
 
 if __name__ == "__main__":
     main()

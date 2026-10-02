@@ -31,7 +31,7 @@ console = Console()
 DEFAULT_BUCKET = "integral-cloud-analysis-data-537472396676"
 DEFAULT_REGION = "us-east-1"
 DEFAULT_AMI = "ami-05dee78f58650ed2c"  # Amazon Linux 2023 x86_64
-DEFAULT_SUBNET = "subnet-a9e00af0"     # us-east-1c default subnet
+DEFAULT_SUBNET = "subnet-a9e00af0"  # us-east-1c default subnet
 IAM_PROFILE_NAME = "IntegralCloudBenchmarkProfile"
 
 
@@ -181,7 +181,9 @@ def launch(
     bucket: str = typer.Option(DEFAULT_BUCKET, "--bucket", "-b", help="Target S3 bucket"),
     region: str = typer.Option(DEFAULT_REGION, "--region", "-r", help="AWS region"),
     subnet: str = typer.Option(DEFAULT_SUBNET, "--subnet", "-s", help="Subnet ID"),
-    instance_type: str = typer.Option("c6i.large", "--instance-type", "-t", help="EC2 instance type"),
+    instance_type: str = typer.Option(
+        "c6i.large", "--instance-type", "-t", help="EC2 instance type"
+    ),
     spot: bool = typer.Option(True, "--spot/--on-demand", help="Use Spot or On-Demand"),
 ):
     """Spin up an ephemeral EC2 instance to sync calibration files directly from HEASARC to S3."""
@@ -198,15 +200,17 @@ def launch(
     ]
 
     mode_label = "Spot" if spot else "On-Demand"
-    console.print(Panel(
-        f"[bold green]Launching Ephemeral Calibration Sync Worker[/bold green]\n"
-        f"• Region: [cyan]{region}[/cyan]\n"
-        f"• Instance Type: [cyan]{instance_type} ({mode_label})[/cyan]\n"
-        f"• Target S3: [cyan]s3://{bucket}/caldb/[/cyan]\n"
-        f"• Subnet: [cyan]{subnet}[/cyan]\n"
-        f"• Shutdown Behavior: [bold red]terminate[/bold red]",
-        title="EC2 Launch Config"
-    ))
+    console.print(
+        Panel(
+            f"[bold green]Launching Ephemeral Calibration Sync Worker[/bold green]\n"
+            f"• Region: [cyan]{region}[/cyan]\n"
+            f"• Instance Type: [cyan]{instance_type} ({mode_label})[/cyan]\n"
+            f"• Target S3: [cyan]s3://{bucket}/caldb/[/cyan]\n"
+            f"• Subnet: [cyan]{subnet}[/cyan]\n"
+            f"• Shutdown Behavior: [bold red]terminate[/bold red]",
+            title="EC2 Launch Config",
+        )
+    )
 
     launch_kwargs = {
         "ImageId": DEFAULT_AMI,
@@ -216,19 +220,23 @@ def launch(
         "UserData": user_data_b64,
         "InstanceInitiatedShutdownBehavior": "terminate",
         "IamInstanceProfile": {"Name": IAM_PROFILE_NAME},
-        "NetworkInterfaces": [{
-            "DeviceIndex": 0,
-            "AssociatePublicIpAddress": True,
-            "SubnetId": subnet,
-        }],
-        "BlockDeviceMappings": [{
-            "DeviceName": "/dev/xvda",
-            "Ebs": {
-                "VolumeSize": 30,
-                "VolumeType": "gp3",
-                "DeleteOnTermination": True,
-            },
-        }],
+        "NetworkInterfaces": [
+            {
+                "DeviceIndex": 0,
+                "AssociatePublicIpAddress": True,
+                "SubnetId": subnet,
+            }
+        ],
+        "BlockDeviceMappings": [
+            {
+                "DeviceName": "/dev/xvda",
+                "Ebs": {
+                    "VolumeSize": 30,
+                    "VolumeType": "gp3",
+                    "DeleteOnTermination": True,
+                },
+            }
+        ],
         "TagSpecifications": [
             {"ResourceType": "instance", "Tags": tags},
             {"ResourceType": "volume", "Tags": tags},
@@ -247,7 +255,9 @@ def launch(
 
         instance_id = resp["Instances"][0]["InstanceId"]
         console.print(f"[bold green]✓ Launched spot instance {instance_id}[/bold green]")
-        console.print("[dim]The instance will mirror the IC tree directly from HEASARC to S3 and terminate automatically.[/dim]")
+        console.print(
+            "[dim]The instance will mirror the IC tree directly from HEASARC to S3 and terminate automatically.[/dim]"
+        )
         return instance_id
 
     except Exception as e:
