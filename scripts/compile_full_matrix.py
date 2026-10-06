@@ -121,7 +121,19 @@ def parse_cloud_runs(datasets: dict[str, Any]) -> dict[str, dict[str, list[float
     for fname, content in datasets.items():
         # Handle purplespark workstation results
         if "i7_3770" in fname or "results_i7_3770" in fname:
-            if "raw_runs" in content:
+            if "cells" in content:
+                for cell in content.get("cells", []):
+                    scw_cnt = str(cell.get("scw_count", ""))
+                    k = "100" if scw_cnt in ("100", "104", "full") else scw_cnt
+                    if k in data_by_platform["i7-3770 (purplespark)"]:
+                        if cell.get("timings"):
+                            for t_val in cell["timings"]:
+                                data_by_platform["i7-3770 (purplespark)"][k].append(float(t_val))
+                        elif "runs" in cell:
+                            for r in cell["runs"]:
+                                if "elapsed_seconds" in r:
+                                    data_by_platform["i7-3770 (purplespark)"][k].append(float(r["elapsed_seconds"]))
+            elif "raw_runs" in content:
                 for scale_key, runs in content["raw_runs"].items():
                     k = "100" if scale_key in ("100", "full") else scale_key
                     if k in data_by_platform["i7-3770 (purplespark)"]:
@@ -129,7 +141,6 @@ def parse_cloud_runs(datasets: dict[str, Any]) -> dict[str, dict[str, list[float
                             if "wall_clock_seconds" in r:
                                 data_by_platform["i7-3770 (purplespark)"][k].append(float(r["wall_clock_seconds"]))
             elif "summary_matrix" in content:
-                # Fallback if raw_runs not saved
                 for row in content["summary_matrix"]:
                     sz = str(row.get("scw_size", "")).lower().replace(" scws", "").strip()
                     k = "100" if sz in ("100", "full") else sz
