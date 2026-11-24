@@ -6,6 +6,10 @@ import asyncio
 import re
 import shutil
 import sys
+import time
+from collections.abc import Awaitable, Callable
+from contextlib import nullcontext
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -15,39 +19,105 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import (
     BarColumn,
+    DownloadColumn,
     Progress,
     SpinnerColumn,
     TextColumn,
+    TimeElapsedColumn,
+    TransferSpeedColumn,
 )
 from rich.prompt import Confirm
 from rich.table import Table
 
 from integral.core.config import config
+from integral.core.http import (
+    RETRY_ATTEMPTS,
+    RETRY_STATUSES,
+    backoff,
+    describe_error,
+    get_with_retry,
+)
+from integral.core.isla import (
+    ISLA_BASE,
+    ISLA_MAX_CONCURRENCY,
+    IslaError,
+    isla_download_scw,
+    isla_list_scws,
+)
+from integral.core.s3 import NASA_HEASARC_S3_BASE, is_s3_url, s3_list, s3_uri_to_https
 from integral.core.scw import filter_pointing_scws
+from integral.core.transfer_stats import TransferStats, active, record_file
 
 console = Console()
 data_app = typer.Typer(
-    help="Manage INTEGRAL archive data, local imports, and async HEASARC downloads"
+    help="Manage INTEGRAL archive data, local imports, and async HEASARC/ISLA downloads"
 )
 download_app = typer.Typer(
-    help="Download Science Windows, calibration, and support data from HEASARC"
+    help="Download Science Windows, calibration, and support data from HEASARC or ESA ISLA. "
+    "Every download prints a per-phase timing/throughput summary."
 )
 data_app.add_typer(download_app, name="download")
 
 KNOWN_MIRRORS = {
     "heasarc": "https://heasarc.gsfc.nasa.gov/FTP/integral/data",
-    "isdc": "https://isdc.unige.ch/ftp/arc/rev_3",
+    "isla": ISLA_BASE,
+    "s3": NASA_HEASARC_S3_BASE,
 }
+MIRROR_DESCRIPTIONS = {
+    "heasarc": "NASA HEASARC (USA) - full archive tree",
+    "isla": "ESA ISLA (Spain) - ScW data; catalogs/IC/aux from HEASARC",
+    "s3": "NASA HEASARC on AWS S3 (us-east-1, public, no credentials) - full archive tree",
+}
+# Mirrors that used to be built in but no longer serve data. The value explains what to do instead.
+RETIRED_MIRRORS = {
+    "isdc": "The ISDC (Geneva) HTTP archive at isdc.unige.ch is offline (the hostname no "
+    "longer resolves). Use 'isla' for ESA's European archive, 'heasarc' or 's3' for NASA's, or pass a working ISDC base "
+    "URL with --mirror https://...",
+}
+# Which mirror to offer when one is down (interactive runs only). HEASARC HTTPS and S3 hold
+# identical copies of the archive, so they back each other up.
+PREFERRED_ALTERNATIVE = {"heasarc": "s3", "s3": "heasarc", "isla": "heasarc"}
 DEFAULT_MIRROR_NAME = "heasarc"
 HEASARC_FTP_BASE = KNOWN_MIRRORS["heasarc"]
 
 
+@dataclass(frozen=True)
+class ArchiveSource:
+    """Where each kind of data comes from for one download run.
+
+    kind='tree' means the mirror serves the full archive directory tree (scw/, aux/, cat/, ic/,
+    idx/) over HTTP, as HEASARC does. kind='isla' means ScW data comes from ESA ISLA, and the
+    support data it doesn't serve (catalogs, IC, aux, rev.001) comes from `support_url`.
+    """
+
+    name: str
+    base_url: str
+    kind: str = "tree"
+    support_url: str = HEASARC_FTP_BASE
+    probe_latency_s: float | None = None
+
+    @property
+    def label(self) -> str:
+        return f"{self.name} ({self.base_url})"
+
+
+class RetiredMirrorError(ValueError):
+    pass
+
+
 def resolve_mirror_base(mirror: str | None = None) -> tuple[str, str]:
-    """Resolve mirror identifier or custom URL into (mirror_name, base_url)."""
+    """Resolve mirror identifier or custom URL into (mirror_name, base_url).
+
+    Raises RetiredMirrorError for mirrors that no longer serve data (e.g. 'isdc')."""
     raw = (mirror or config.archive_mirror or DEFAULT_MIRROR_NAME).strip()
     key = raw.lower()
+    if key in RETIRED_MIRRORS:
+        raise RetiredMirrorError(f"Mirror '{key}' is retired. {RETIRED_MIRRORS[key]}")
     if key in KNOWN_MIRRORS:
         return key, KNOWN_MIRRORS[key]
+    # s3://bucket/prefix (anonymous, public buckets only) -> virtual-hosted HTTPS URL
+    if raw.startswith("s3://"):
+        return "custom-s3", s3_uri_to_https(raw)
     # If a full URL was provided
     if raw.startswith(("http://", "https://")):
         return "custom", raw.rstrip("/")
@@ -55,21 +125,30 @@ def resolve_mirror_base(mirror: str | None = None) -> tuple[str, str]:
     return DEFAULT_MIRROR_NAME, KNOWN_MIRRORS[DEFAULT_MIRROR_NAME]
 
 
+def resolve_source(mirror: str | None = None) -> ArchiveSource:
+    name, url = resolve_mirror_base(mirror)
+    if name == "isla" or url.rstrip("/") == ISLA_BASE:
+        return ArchiveSource("isla", url, kind="isla", support_url=HEASARC_FTP_BASE)
+    return ArchiveSource(name, url, kind="tree", support_url=url)
+
+
 async def probe_mirror_health(base_url: str, timeout_sec: float = 5.0) -> tuple[bool, float, str]:
     """Ping a mirror to assess latency and availability. Returns (is_available, latency_seconds, error_msg)."""
-    import time
-
     start = time.perf_counter()
     try:
         async with httpx.AsyncClient(timeout=timeout_sec, follow_redirects=True) as client:
-            resp = await client.head(f"{base_url}/")
+            if is_s3_url(base_url):
+                # A bucket "directory" is not an object, so HEAD would 404; list one key instead.
+                resp = await s3_list(client, base_url, timeout=timeout_sec, max_keys=1)
+            else:
+                resp = await client.head(f"{base_url}/")
             latency = time.perf_counter() - start
             if resp.status_code in [200, 301, 302]:
                 return True, latency, ""
             return False, latency, f"HTTP {resp.status_code}"
     except Exception as e:
         latency = time.perf_counter() - start
-        return False, latency, str(e)
+        return False, latency, describe_error(e)
 
 
 ALL_INSTRUMENTS = ["ibis", "jmx1", "jmx2", "omc", "spi", "sc", "irem"]
@@ -96,6 +175,15 @@ def _validate_scope_flags(science_only: bool, calib_only: bool) -> None:
         raise typer.Exit(code=1)
 
 
+async def _get(client: httpx.AsyncClient, dir_url: str) -> httpx.Response:
+    """Fetch a directory listing (with retries). HTTP mirrors return their HTML index; S3 mirrors
+    are listed via ListObjectsV2 and rendered in the same HTML shape, so every listing parser in
+    this module works against either."""
+    if is_s3_url(dir_url):
+        return await s3_list(client, dir_url)
+    return await get_with_retry(client, dir_url)
+
+
 async def async_download_file(
     client: httpx.AsyncClient,
     url: str,
@@ -104,41 +192,63 @@ async def async_download_file(
     task_id=None,
     force: bool = False,
 ) -> bool:
-    """Asynchronously download a file with atomic .tmp write and resume safety."""
-    if dest_path.exists() and not force:
+    """Asynchronously download a file with atomic .tmp write and resume safety.
+
+    Transient failures (connection errors, timeouts, 429/502/503/504) are retried with
+    backoff. The outcome (new / cached / failed, plus bytes received) is reported to the active
+    TransferStats, if there is one."""
+
+    def _advance() -> None:
         if progress is not None and task_id is not None:
             progress.advance(task_id, 1)
+
+    if dest_path.exists() and not force:
+        record_file("cached")
+        _advance()
         return True
 
     dest_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = dest_path.with_suffix(".tmp")
+    temp_path = dest_path.with_name(dest_path.name + ".tmp")
 
     try:
-        async with client.stream("GET", url, timeout=60.0) as response:
-            if response.status_code != 200:
-                if progress is not None and task_id is not None:
-                    progress.advance(task_id, 1)
-                return False
+        for attempt in range(RETRY_ATTEMPTS):
+            last = attempt == RETRY_ATTEMPTS - 1
+            received = 0
+            try:
+                async with client.stream("GET", url, timeout=60.0) as response:
+                    if response.status_code != 200:
+                        if response.status_code in RETRY_STATUSES and not last:
+                            await backoff(attempt)
+                            continue
+                        record_file("failed", url=url, detail=f"HTTP {response.status_code}")
+                        return False
 
-            # Blocking file I/O inside an async function - a real anti-pattern, but fixing it
-            # properly needs either the `aiofiles` dependency or per-chunk asyncio.to_thread
-            # (which would add thread-pool overhead on every 64KB chunk). Deferred rather than
-            # fixed here; each concurrent download's disk writes briefly block the event loop.
-            with open(temp_path, "wb") as f:  # noqa: ASYNC230
-                async for chunk in response.aiter_bytes(chunk_size=65536):
-                    f.write(chunk)
+                    # Blocking file I/O inside an async function - a real anti-pattern, but fixing it
+                    # properly needs either the `aiofiles` dependency or per-chunk asyncio.to_thread
+                    # (which would add thread-pool overhead on every 64KB chunk). Deferred rather than
+                    # fixed here; each concurrent download's disk writes briefly block the event loop.
+                    with open(temp_path, "wb") as f:  # noqa: ASYNC230
+                        async for chunk in response.aiter_bytes(chunk_size=65536):
+                            f.write(chunk)
+                            received += len(chunk)
+            except httpx.TransportError:
+                temp_path.unlink(missing_ok=True)
+                if last:
+                    raise
+                await backoff(attempt)
+                continue
 
-        temp_path.rename(dest_path)
-        if progress is not None and task_id is not None:
-            progress.advance(task_id, 1)
-        return True
-    except Exception as e:
-        console.print(f"[dim red]Warning: failed to download {url}: {e}[/dim red]")
-        if temp_path.exists():
-            temp_path.unlink()
-        if progress is not None and task_id is not None:
-            progress.advance(task_id, 1)
+            temp_path.rename(dest_path)
+            record_file("new", nbytes=received, url=url)
+            return True
         return False
+    except Exception as e:
+        console.print(f"[dim red]Warning: failed to download {url}: {describe_error(e)}[/dim red]")
+        temp_path.unlink(missing_ok=True)
+        record_file("failed", url=url, detail=describe_error(e))
+        return False
+    finally:
+        _advance()
 
 
 async def async_list_scw_files(
@@ -147,11 +257,17 @@ async def async_list_scw_files(
     """List the files present in a Science Window's remote directory."""
     rev = scw_id[:4]
     scw_url = f"{base_url}/scw/{rev}/{scw_id}.001/"
-    resp = await client.get(scw_url, timeout=30.0)
+    try:
+        resp = await _get(client, scw_url)
+    except httpx.HTTPError as e:
+        console.print(f"[red]Could not list ScW {scw_id}: {describe_error(e)}[/red]")
+        record_file("failed", url=scw_url, detail=f"listing: {describe_error(e)}")
+        return []
     if resp.status_code != 200:
         console.print(
             f"[red]ScW {scw_id} directory not found on server (HTTP {resp.status_code})[/red]"
         )
+        record_file("failed", url=scw_url, detail=f"listing: HTTP {resp.status_code}")
         return []
 
     file_matches = re.findall(r'href="([^"?/][^"]*)"', resp.text)
@@ -192,11 +308,31 @@ async def async_download_scw_files(
 
 
 async def async_list_remote_scws(
-    client: httpx.AsyncClient, rev_id: str, base_url: str = HEASARC_FTP_BASE
+    client: httpx.AsyncClient,
+    rev_id: str,
+    base_url: str = HEASARC_FTP_BASE,
+    kind: str = "tree",
 ) -> list[str]:
-    """List available ScW IDs for a revolution directly from the remote archive server."""
+    """List available ScW IDs for a revolution directly from the remote archive server.
+
+    Network errors are reported and give an empty list rather than a traceback."""
+    if kind == "isla":
+        try:
+            return await isla_list_scws(client, rev_id, base_url=base_url)
+        except (httpx.HTTPError, IslaError) as e:
+            console.print(
+                f"[red]Could not list revolution {rev_id} on ISLA: {describe_error(e)}[/red]"
+            )
+            return []
+
     rev_url = f"{base_url}/scw/{rev_id}/"
-    resp = await client.get(rev_url, timeout=30.0)
+    try:
+        resp = await _get(client, rev_url)
+    except httpx.HTTPError as e:
+        console.print(
+            f"[red]Could not list revolution {rev_id} at {rev_url}: {describe_error(e)}[/red]"
+        )
+        return []
     if resp.status_code != 200:
         console.print(
             f"[red]Revolution {rev_id} not found on server (HTTP {resp.status_code})[/red]"
@@ -221,7 +357,7 @@ async def async_download_aux(
     aux_url = f"{base_url}/aux/adp/{rev_id}.001/"
 
     try:
-        resp = await client.get(aux_url, timeout=30.0)
+        resp = await _get(client, aux_url)
         if resp.status_code != 200:
             console.print(
                 f"[red]Aux data for revolution {rev_id} not found on server (HTTP {resp.status_code})[/red]"
@@ -259,7 +395,7 @@ async def async_download_rev_context(
     local_rev_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        resp = await client.get(rev_url, timeout=30.0)
+        resp = await _get(client, rev_url)
         if resp.status_code != 200:
             console.print(
                 f"[dim yellow]Notice: Revolution context rev.001 not found for rev {rev_id} (HTTP {resp.status_code})[/dim yellow]"
@@ -270,7 +406,7 @@ async def async_download_rev_context(
         async def fetch_dir(rel_path: str, target_dir: Path) -> int:
             target_dir.mkdir(parents=True, exist_ok=True)
             u = f"{rev_url}{rel_path}"
-            r = await client.get(u, timeout=30.0)
+            r = await _get(client, u)
             if r.status_code != 200:
                 return 0
             hrefs = re.findall(r'href="([^"?/][^"]*)"', r.text)
@@ -326,7 +462,7 @@ async def async_download_aux_ref(
     local_tcor_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        resp = await client.get(tcor_url, timeout=30.0)
+        resp = await _get(client, tcor_url)
         if resp.status_code != 200:
             return 0
         file_matches = re.findall(r'href="([^"?/]+\.fits(?:\.gz)?)"', resp.text)
@@ -442,7 +578,7 @@ async def async_download_ic_index(
 
     console.print(f"[bold blue]Scanning IC index files at {idx_url}...[/bold blue]")
     try:
-        resp = await client.get(idx_url, timeout=30.0)
+        resp = await _get(client, idx_url)
         if resp.status_code != 200:
             console.print(f"[red]Error fetching IC index listing (HTTP {resp.status_code})[/red]")
             return
@@ -473,7 +609,7 @@ async def scan_and_download_ic_dir(
 ):
     """Recursively scan and download an IC directory."""
     try:
-        resp = await client.get(base_url, timeout=30.0)
+        resp = await _get(client, base_url)
         if resp.status_code != 200:
             return
 
@@ -502,6 +638,7 @@ async def scan_and_download_ic_dir(
 
                 download_tasks.append(fetch(f"{base_url}{fn}", target))
             else:
+                record_file("cached")
                 progress.advance(task_id, 1)
 
         if download_tasks:
@@ -594,6 +731,10 @@ async def _download_catalogs(
             )
         )
 
+    for existing in (target_fits, omc_target):
+        if existing.exists() and not force:
+            record_file("cached")
+
     if tasks:
         console.print("[bold blue]Fetching reference catalogs...[/bold blue]")
         await asyncio.gather(*tasks)
@@ -618,13 +759,141 @@ async def _download_calibration(
     gigabytes per instrument (response matrices, background models, etc.), so they are not
     fetched automatically just because a Science Window or revolution was requested.
     """
-    await _download_catalogs(client, dest_base, cat_version, force=force, base_url=base_url)
-    await async_download_ic_index(client, dest_base, force=force, base_url=base_url)
+    with _phase("Catalogs"):
+        await _download_catalogs(client, dest_base, cat_version, force=force, base_url=base_url)
+    with _phase("IC index"):
+        await async_download_ic_index(client, dest_base, force=force, base_url=base_url)
     if ic_trees:
         for inst in instruments:
-            await async_download_ic_tree(
-                client, inst, dest_base, semaphore, force=force, base_url=base_url
+            with _phase(f"IC tree ({inst})"):
+                await async_download_ic_tree(
+                    client, inst, dest_base, semaphore, force=force, base_url=base_url
+                )
+
+
+def _phase(name: str):
+    """Time a block as a named phase of the active TransferStats (no-op when none is active)."""
+    stats = active()
+    return stats.phase(name) if stats is not None else nullcontext()
+
+
+async def _download_science_tree(
+    client: httpx.AsyncClient,
+    dest_base: Path,
+    scw_ids: list[str],
+    semaphore: asyncio.Semaphore,
+    force: bool,
+    dry_run: bool,
+    base_url: str,
+) -> None:
+    """Science Window data from a directory-tree mirror (HEASARC or custom): list each ScW's
+    directory, then fetch every file concurrently."""
+    console.print(f"[bold blue]Listing files for {len(scw_ids)} Science Window(s)...[/bold blue]")
+    with _phase("ScW listing"):
+        listings = await asyncio.gather(
+            *(async_list_scw_files(client, s, base_url=base_url) for s in scw_ids)
+        )
+    total_files = sum(len(f) for f in listings)
+
+    if dry_run:
+        console.print(
+            f"[yellow]Dry run: would download {total_files} file(s) across {len(scw_ids)} ScW(s).[/yellow]"
+        )
+        return
+    if total_files == 0:
+        console.print("[yellow]No Science Window files found to download.[/yellow]")
+        return
+
+    with (
+        _phase("Science Windows"),
+        Progress(
+            SpinnerColumn(),
+            TextColumn("[bold cyan]Downloading Science Windows...[/bold cyan]"),
+            BarColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            TextColumn("({task.completed}/{task.total} files)"),
+            TimeElapsedColumn(),
+            console=console,
+        ) as progress,
+    ):
+        task_id = progress.add_task("scw", total=total_files)
+        await asyncio.gather(
+            *(
+                async_download_scw_files(
+                    client,
+                    scw_id,
+                    files,
+                    dest_base,
+                    semaphore,
+                    progress=progress,
+                    task_id=task_id,
+                    force=force,
+                    base_url=base_url,
+                )
+                for scw_id, files in zip(scw_ids, listings)
             )
+        )
+
+
+async def _download_science_isla(
+    client: httpx.AsyncClient,
+    dest_base: Path,
+    scw_ids: list[str],
+    concurrency: int,
+    force: bool,
+    dry_run: bool,
+    base_url: str,
+) -> None:
+    """Science Window data from ESA ISLA: one zip per ScW, unpacked into the archive layout."""
+    if dry_run:
+        console.print(
+            f"[yellow]Dry run: would download {len(scw_ids)} ScW zip(s) from ISLA ({base_url}).[/yellow]"
+        )
+        return
+
+    isla_streams = min(concurrency, ISLA_MAX_CONCURRENCY)
+    if isla_streams < concurrency:
+        console.print(
+            f"[dim]ISLA serves one zip per ScW; using {isla_streams} parallel requests "
+            f"(capped from {concurrency} to be gentle on the service).[/dim]"
+        )
+    semaphore = asyncio.Semaphore(isla_streams)
+    stats = active()
+    if stats is not None:
+        stats.science_streams = isla_streams
+
+    with (
+        _phase("Science Windows"),
+        Progress(
+            SpinnerColumn(),
+            TextColumn("[bold cyan]{task.description}[/bold cyan]"),
+            DownloadColumn(),
+            TransferSpeedColumn(),
+            TimeElapsedColumn(),
+            console=console,
+        ) as progress,
+    ):
+        done = 0
+        task_id = progress.add_task(f"Downloading ScWs from ISLA (0/{len(scw_ids)})", total=None)
+
+        async def one(scw_id: str) -> bool:
+            nonlocal done
+            ok = await isla_download_scw(
+                client,
+                scw_id,
+                dest_base,
+                semaphore,
+                force=force,
+                base_url=base_url,
+                on_bytes=lambda n: progress.advance(task_id, n),
+            )
+            done += 1
+            progress.update(
+                task_id, description=f"Downloading ScWs from ISLA ({done}/{len(scw_ids)})"
+            )
+            return ok
+
+        await asyncio.gather(*(one(s) for s in scw_ids))
 
 
 async def _run_data_download(
@@ -640,54 +909,26 @@ async def _run_data_download(
     dry_run: bool,
     ic_trees: bool = False,
     base_url: str = HEASARC_FTP_BASE,
+    source: ArchiveSource | None = None,
 ):
-    """Shared orchestration for the revolution/scw/file download subcommands."""
+    """Shared orchestration for the revolution/scw/file download subcommands.
+
+    `source` decides where ScW data comes from (a directory-tree mirror or ESA ISLA) and where
+    catalogs/IC/aux come from. If it is omitted, `base_url` is treated as a directory-tree mirror
+    for everything."""
+    source = source or ArchiveSource("custom", base_url, kind="tree", support_url=base_url)
+    support_url = source.support_url
     semaphore = asyncio.Semaphore(concurrency)
     revisions = sorted({s[:4] for s in scw_ids})
 
     if fetch_science and scw_ids:
-        console.print(
-            f"[bold blue]Listing files for {len(scw_ids)} Science Window(s)...[/bold blue]"
-        )
-        listings = await asyncio.gather(
-            *(async_list_scw_files(client, s, base_url=base_url) for s in scw_ids)
-        )
-        total_files = sum(len(f) for f in listings)
-
-        if dry_run:
-            console.print(
-                f"[yellow]Dry run: would download {total_files} file(s) across {len(scw_ids)} ScW(s).[/yellow]"
+        if source.kind == "isla":
+            await _download_science_isla(
+                client, dest_base, scw_ids, concurrency, force, dry_run, source.base_url
             )
-        elif total_files == 0:
-            console.print("[yellow]No Science Window files found to download.[/yellow]")
         else:
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[bold cyan]Downloading Science Windows...[/bold cyan]"),
-                BarColumn(),
-                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                TextColumn("({task.completed}/{task.total} files)"),
-                console=console,
-            ) as progress:
-                task_id = progress.add_task("scw", total=total_files)
-                results = await asyncio.gather(
-                    *(
-                        async_download_scw_files(
-                            client,
-                            scw_id,
-                            files,
-                            dest_base,
-                            semaphore,
-                            progress=progress,
-                            task_id=task_id,
-                            force=force,
-                            base_url=base_url,
-                        )
-                        for scw_id, files in zip(scw_ids, listings)
-                    )
-                )
-            console.print(
-                f"[bold green]✓ Downloaded {sum(results)} files across {len(scw_ids)} Science Window(s).[/bold green]"
+            await _download_science_tree(
+                client, dest_base, scw_ids, semaphore, force, dry_run, source.base_url
             )
 
     if fetch_calib:
@@ -700,7 +941,7 @@ async def _run_data_download(
             )
             console.print(
                 f"[yellow]Dry run: would ensure catalogs, IC index, {ic_desc}, "
-                f"and aux data for revolution(s): {rev_desc}.[/yellow]"
+                f"and aux data for revolution(s): {rev_desc} from {support_url}.[/yellow]"
             )
         else:
             await _download_calibration(
@@ -711,24 +952,27 @@ async def _run_data_download(
                 cat_version,
                 force,
                 ic_trees=ic_trees,
-                base_url=base_url,
+                base_url=support_url,
             )
             # Ensure essential mission time reference tables (tcoroffset) are present
-            await async_download_aux_ref(client, dest_base, force=force, base_url=base_url)
+            with _phase("Aux reference"):
+                await async_download_aux_ref(client, dest_base, force=force, base_url=support_url)
             for rev_id in revisions:
                 console.print(
                     f"[bold blue]Fetching aux data for revolution {rev_id}...[/bold blue]"
                 )
-                count = await async_download_aux(
-                    client, rev_id, dest_base, semaphore, force=force, base_url=base_url
-                )
+                with _phase("Aux (adp)"):
+                    count = await async_download_aux(
+                        client, rev_id, dest_base, semaphore, force=force, base_url=support_url
+                    )
                 console.print(
                     f"[bold green]✓ Aux data for revolution {rev_id} ready ({count} files).[/bold green]"
                 )
                 # Fetch revolution context files (rev.001) required for ScW processing
-                await async_download_rev_context(
-                    client, rev_id, dest_base, semaphore, force=force, base_url=base_url
-                )
+                with _phase("Revolution context"):
+                    await async_download_rev_context(
+                        client, rev_id, dest_base, semaphore, force=force, base_url=support_url
+                    )
 
             # Ensure ic_master_file.fits does not reference non-downloaded instrument categories
             clean_ic_master_file(dest_base)
@@ -854,6 +1098,35 @@ def import_local(
     )
 
 
+MAX_REVOLUTIONS_PER_COMMAND = 500
+
+
+def parse_revolutions(spec: str) -> list[str]:
+    """Parse '60', '0060-0065' or '0060,0071,0102-0104' into sorted unique 4-digit revolution IDs."""
+    revs: set[int] = set()
+    for part in (p.strip() for p in spec.split(",")):
+        if not part:
+            continue
+        lo_s, sep, hi_s = part.partition("-")
+        if not lo_s.strip().isdigit() or (sep and not hi_s.strip().isdigit()):
+            raise ValueError(
+                f"Invalid revolution spec {part!r}: use e.g. 0060, 0060-0065, 0060,0071"
+            )
+        lo, hi = int(lo_s), int(hi_s) if sep else int(lo_s)
+        if lo > hi:
+            raise ValueError(f"Invalid revolution range {part!r}: start is after end")
+        if hi > 9999:
+            raise ValueError(f"Revolution {hi} is out of range (max 9999)")
+        revs.update(range(lo, hi + 1))
+        if len(revs) > MAX_REVOLUTIONS_PER_COMMAND:
+            raise ValueError(
+                f"More than {MAX_REVOLUTIONS_PER_COMMAND} revolutions requested; split the request."
+            )
+    if not revs:
+        raise ValueError("No revolution given")
+    return [f"{r:04d}" for r in sorted(revs)]
+
+
 _SCOPE_HELP = {
     "science_only": "Skip catalogs/IC/aux, fetch only Science Window data",
     "calib_only": "Skip Science Window data, only ensure catalogs/IC/aux are present",
@@ -866,60 +1139,158 @@ _SCOPE_HELP = {
     "ic_trees": "Also fetch full per-instrument IC calibration trees (response matrices, "
     "background models, etc.) - can be multiple GB per instrument, so opt-in rather than "
     "part of the default catalogs+IC-index+aux fetch",
-    "mirror": "Archive mirror to download from ('heasarc', 'isdc', or custom base URL). "
-    "Default: configured archive_mirror or 'heasarc'",
+    "mirror": "Archive source: 'heasarc' (NASA HTTPS, full archive tree), 's3' (the same "
+    "archive in NASA's public AWS bucket s3://nasa-heasarc, no credentials needed), 'isla' (ESA; "
+    "Science Window data only - catalogs/IC/aux still come from HEASARC), a custom https:// "
+    "base URL, or an s3://bucket/prefix of a public HEASARC-style tree. Default: configured "
+    "archive_mirror or 'heasarc'",
+    "stats_file": "Append a JSON line with this run's timings, volumes and throughput "
+    "(per phase and total) to this file - handy for comparing mirrors across runs",
+    "yes": "Non-interactive mode: skip confirmation, and never switch mirrors automatically",
 }
 
 
-async def _check_and_select_mirror(mirror_opt: str | None = None) -> tuple[str, str]:
-    """Resolve requested mirror and test connectivity. Prompt or warn if unreachable/slow."""
-    mirror_name, base_url = resolve_mirror_base(mirror_opt)
-    console.print(
-        f"[dim]Checking mirror connectivity: [cyan]{mirror_name}[/cyan] ({base_url})...[/dim]"
-    )
-    ok, latency, err = await probe_mirror_health(base_url, timeout_sec=6.0)
+async def _check_and_select_mirror(
+    mirror_opt: str | None = None, interactive: bool = False
+) -> ArchiveSource:
+    """Resolve the requested source and test connectivity.
 
-    if not ok:
-        console.print(
-            f"[bold yellow]⚠️  Warning: Mirror '{mirror_name}' is currently unreachable or slow ({err}).[/bold yellow]"
-        )
-        # Suggest alternative mirror if using standard mirror
-        alt_name = "isdc" if mirror_name == "heasarc" else "heasarc"
-        alt_url = KNOWN_MIRRORS.get(alt_name)
-        if alt_url:
+    If the mirror is unreachable, an interactive session is offered the other built-in mirror.
+    Non-interactive runs (-y, or no TTY) never switch, so a scripted timing run measures the
+    mirror it asked for."""
+    try:
+        source = resolve_source(mirror_opt)
+    except RetiredMirrorError as e:
+        console.print(f"[bold red]Error: {e}[/bold red]")
+        if not mirror_opt:
             console.print(
-                f"[yellow]Testing alternative mirror '{alt_name}' ({alt_url})...[/yellow]"
+                "[yellow]It is your configured default; change it with "
+                "'integral data mirror heasarc' (or 'isla').[/yellow]"
             )
-            alt_ok, alt_latency, _alt_err = await probe_mirror_health(alt_url, timeout_sec=5.0)
-            if alt_ok:
-                console.print(
-                    f"[bold green]✓ Alternative mirror '{alt_name}' is online ({alt_latency:.2f}s latency)![/bold green]"
-                )
-                if Confirm.ask(f"Would you like to switch to '{alt_name}' mirror?", default=True):
-                    return alt_name, alt_url
-        console.print(
-            f"[yellow]Proceeding with '{mirror_name}' as requested (may experience timeouts).[/yellow]"
-        )
-    elif latency > 3.0:
-        console.print(
-            f"[yellow]⚠️  Notice: Mirror '{mirror_name}' responded slowly ({latency:.2f}s).[/yellow]"
-        )
-    else:
-        console.print(
-            f"[dim green]✓ Mirror '{mirror_name}' active ({latency:.2f}s response).[/dim green]"
-        )
+        raise typer.Exit(code=1) from None
 
-    return mirror_name, base_url
+    console.print(f"[dim]Checking mirror connectivity: [cyan]{source.label}[/cyan]...[/dim]")
+    ok, latency, err = await probe_mirror_health(source.base_url, timeout_sec=6.0)
+
+    if ok:
+        if latency > 3.0:
+            console.print(
+                f"[yellow]⚠️  Notice: Mirror '{source.name}' responded slowly ({latency:.2f}s).[/yellow]"
+            )
+        else:
+            console.print(
+                f"[dim green]✓ Mirror '{source.name}' active ({latency:.2f}s response).[/dim green]"
+            )
+        if source.kind == "isla":
+            console.print(
+                "[dim]ISLA serves Science Window data; catalogs, IC and aux data will come "
+                "from HEASARC.[/dim]"
+            )
+        return replace(source, probe_latency_s=latency)
+
+    console.print(
+        f"[bold yellow]⚠️  Warning: Mirror '{source.name}' is currently unreachable or slow ({err}).[/bold yellow]"
+    )
+    alt_name = PREFERRED_ALTERNATIVE.get(source.name)
+    if interactive and alt_name:
+        alt = resolve_source(alt_name)
+        console.print(f"[yellow]Testing alternative mirror {alt.label}...[/yellow]")
+        alt_ok, alt_latency, _alt_err = await probe_mirror_health(alt.base_url, timeout_sec=5.0)
+        if alt_ok:
+            console.print(
+                f"[bold green]✓ Alternative mirror '{alt_name}' is online ({alt_latency:.2f}s latency)![/bold green]"
+            )
+            if Confirm.ask(f"Would you like to switch to '{alt_name}' mirror?", default=True):
+                return replace(alt, probe_latency_s=alt_latency)
+    elif not interactive:
+        console.print("[dim]Non-interactive run: not switching mirrors.[/dim]")
+    console.print(
+        f"[yellow]Proceeding with '{source.name}' as requested (may experience timeouts).[/yellow]"
+    )
+    return source
+
+
+def _run_timed_download(
+    command: str,
+    mirror: str | None,
+    concurrency: int,
+    dry_run: bool,
+    stats_file: Path | None,
+    interactive: bool,
+    body: Callable[[httpx.AsyncClient, ArchiveSource, TransferStats], Awaitable[None]],
+    confirm: Callable[[ArchiveSource], None] | None = None,
+) -> None:
+    """Run one download command with timing.
+
+    Mirror selection and any confirmation prompt happen *before* the clock starts, so user
+    think-time is never counted. Everything in `body` (remote listing, downloads, calibration,
+    aux) is timed. A summary table is printed at the end, even if the run is interrupted, and
+    appended to `stats_file` if one is given. Exits 1 if any file failed to download."""
+
+    async def _main() -> TransferStats:
+        source = await _check_and_select_mirror(mirror, interactive=interactive)
+        if confirm is not None:
+            confirm(source)
+        stats = TransferStats(
+            command=command,
+            source=source.name,
+            science_url=source.base_url,
+            support_url=source.support_url,
+            concurrency=concurrency,
+            probe_latency_s=source.probe_latency_s,
+        )
+        try:
+            with stats.activate():
+                async with httpx.AsyncClient(http2=True, follow_redirects=True) as client:
+                    await body(client, source, stats)
+                stats.completed = True
+        finally:
+            transferred = stats.files_new or stats.files_failed or stats.files_cached
+            if not dry_run and (stats.completed or transferred):
+                console.print()
+                stats.render(console)
+                if stats.unavailable and source.kind == "isla":
+                    ids = ",".join(u.split(" ", 1)[0] for u in stats.unavailable)
+                    console.print(
+                        "[yellow]To fetch them from NASA instead:[/yellow] "
+                        f"integral data download scw {ids} --mirror heasarc --science-only -y"
+                    )
+                if stats_file is not None:
+                    stats.append_to(stats_file)
+                    console.print(f"[dim]Timing record appended to {stats_file}[/dim]")
+        return stats
+
+    stats = asyncio.run(_main())
+    if stats.files_failed:
+        raise typer.Exit(code=1)
+
+
+def _scope_str(science_only: bool, calib_only: bool) -> str:
+    if science_only:
+        return "Science only"
+    return "Calibration only" if calib_only else "Science & Calibration"
+
+
+def _source_lines(source: ArchiveSource) -> str:
+    if source.kind == "isla":
+        return (
+            f"• Science data:   [cyan]{source.label}[/cyan]\n"
+            f"• Support data:   [cyan]heasarc ({source.support_url})[/cyan]\n"
+        )
+    return f"• Mirror:         [cyan]{source.label}[/cyan]\n"
 
 
 @download_app.command("revolution")
 def download_revolution(
-    rev: str = typer.Argument(..., help="Revolution number, e.g. 0060"),
+    rev: str = typer.Argument(
+        ...,
+        help="Revolution(s): a number (0060), a range (0060-0065), or a comma list (0060,0071,0102-0104)",
+    ),
     count: int | None = typer.Option(
         None,
         "--count",
         "-n",
-        help="Fetch only the first N pointing ScWs (default: every pointing ScW)",
+        help="Fetch only the first N pointing ScWs of each revolution (default: every pointing ScW)",
     ),
     id_from: str | None = typer.Option(
         None,
@@ -938,71 +1309,97 @@ def download_revolution(
     force_refresh: bool = typer.Option(False, "--force-refresh", help=_SCOPE_HELP["force_refresh"]),
     mirror: str | None = typer.Option(None, "--mirror", "-m", help=_SCOPE_HELP["mirror"]),
     dry_run: bool = typer.Option(False, "--dry-run", help=_SCOPE_HELP["dry_run"]),
-    yes: bool = typer.Option(
-        False, "--yes", "-y", help="Non-interactive mode: accept all defaults and skip confirmation"
-    ),
+    stats_file: Path | None = typer.Option(None, "--stats-file", help=_SCOPE_HELP["stats_file"]),
+    yes: bool = typer.Option(False, "--yes", "-y", help=_SCOPE_HELP["yes"]),
 ):
-    """Download a whole revolution (or a slice of it) plus its calibration/support data."""
+    """Download whole revolution(s) (or a slice) plus their calibration/support data."""
     _validate_scope_flags(science_only, calib_only)
-    rev_id = f"{int(rev):04d}"
+    try:
+        rev_ids = parse_revolutions(rev)
+    except ValueError as e:
+        console.print(f"[bold red]Error: {e}[/bold red]")
+        raise typer.Exit(code=1) from None
+    if (id_from or id_to) and len(rev_ids) > 1:
+        console.print(
+            "[bold red]Error: --from/--to can only be used with a single revolution.[/bold red]"
+        )
+        raise typer.Exit(code=1)
+    rev_desc = rev_ids[0] if len(rev_ids) == 1 else f"{len(rev_ids)} revolutions ({rev})"
     resolved_insts = _resolve_instruments(instruments)
+    interactive = sys.stdin.isatty() and not yes
 
-    async def _main():
-        chosen_mirror_name, base_url = await _check_and_select_mirror(mirror)
-        if sys.stdin.isatty() and not yes and not dry_run:
-            scope_str = (
-                "Science only"
-                if science_only
-                else ("Calibration only" if calib_only else "Science & Calibration")
+    def confirm(source: ArchiveSource) -> None:
+        if not interactive or dry_run:
+            return
+        console.print(
+            Panel(
+                f"[bold green]Download Plan: Revolution {rev_desc}[/bold green]\n\n"
+                f"• Target Scope:   [cyan]{_scope_str(science_only, calib_only)}[/cyan]\n"
+                f"{_source_lines(source)}"
+                f"• Instruments:    [cyan]{', '.join(resolved_insts)}[/cyan]\n"
+                f"• Full IC Trees:  [cyan]{'Enabled (multi-GB)' if ic_trees else 'Minimal (indexes, rev context, reference data)'}[/cyan]\n"
+                f"• Pointing Limit: [cyan]{count if count else 'All pointing Science Windows'}[/cyan]\n"
+                f"• Destination:    [cyan]{config.rep_base_prod}[/cyan]",
+                title="Download Confirmation",
             )
-            console.print(
-                Panel(
-                    f"[bold green]Download Plan: Revolution {rev_id}[/bold green]\n\n"
-                    f"• Target Scope:   [cyan]{scope_str}[/cyan]\n"
-                    f"• Mirror:         [cyan]{chosen_mirror_name}[/cyan] ({base_url})\n"
-                    f"• Instruments:    [cyan]{', '.join(resolved_insts)}[/cyan]\n"
-                    f"• Full IC Trees:  [cyan]{'Enabled (multi-GB)' if ic_trees else 'Minimal (indexes, rev context, reference data)'}[/cyan]\n"
-                    f"• Pointing Limit: [cyan]{count if count else 'All pointing Science Windows'}[/cyan]\n"
-                    f"• Destination:    [cyan]{config.rep_base_prod}[/cyan]",
-                    title="Download Confirmation",
+        )
+        if not Confirm.ask("Proceed with download?", default=True):
+            console.print("[yellow]Download cancelled by user.[/yellow]")
+            raise typer.Exit(code=0)
+
+    async def body(client: httpx.AsyncClient, source: ArchiveSource, stats: TransferStats):
+        with stats.phase("Revolution listing"):
+            listings = await asyncio.gather(
+                *(
+                    async_list_remote_scws(client, r, base_url=source.base_url, kind=source.kind)
+                    for r in rev_ids
                 )
             )
-            if not Confirm.ask("Proceed with download?", default=True):
-                console.print("[yellow]Download cancelled by user.[/yellow]")
-                raise typer.Exit(code=0)
 
-        async with httpx.AsyncClient(http2=True, follow_redirects=True) as client:
-            all_ids = await async_list_remote_scws(client, rev_id, base_url=base_url)
+        scw_ids: list[str] = []
+        found_revs: list[str] = []
+        for rev_id, all_ids in zip(rev_ids, listings):
             if not all_ids:
                 console.print(
-                    f"[bold red]Error: no Science Windows found for revolution {rev_id} on server {base_url}.[/bold red]"
+                    f"[bold yellow]Warning: no Science Windows found for revolution {rev_id} on {source.label}.[/bold yellow]"
                 )
-                raise typer.Exit(code=1)
-
+                continue
+            found_revs.append(rev_id)
             if id_from or id_to:
                 lo, hi = id_from or min(all_ids), id_to or max(all_ids)
-                scw_ids = sorted(s for s in all_ids if lo <= s <= hi)
+                scw_ids += sorted(s for s in all_ids if lo <= s <= hi)
             else:
-                scw_ids = filter_pointing_scws(all_ids, rev_id)
-                if count:
-                    scw_ids = scw_ids[:count]
-
-            await _run_data_download(
-                client,
-                config.rep_base_prod,
-                scw_ids,
-                fetch_science=not calib_only,
-                fetch_calib=not science_only,
-                instruments=resolved_insts,
-                cat_version=cat_version,
-                concurrency=concurrency,
-                force=force_refresh,
-                dry_run=dry_run,
-                ic_trees=ic_trees,
-                base_url=base_url,
+                picked = filter_pointing_scws(all_ids, rev_id)
+                scw_ids += picked[:count] if count else picked
+        if not scw_ids:
+            console.print(
+                f"[bold red]Error: no Science Windows found for revolution(s) {rev} on {source.label}.[/bold red]"
             )
+            raise typer.Exit(code=1)
+        console.print(
+            f"[dim]Selected {len(scw_ids)} Science Window(s) across {len(found_revs)} revolution(s).[/dim]"
+        )
+        stats.scw_count, stats.revolutions = len(scw_ids), found_revs
 
-    asyncio.run(_main())
+        await _run_data_download(
+            client,
+            config.rep_base_prod,
+            scw_ids,
+            fetch_science=not calib_only,
+            fetch_calib=not science_only,
+            instruments=resolved_insts,
+            cat_version=cat_version,
+            concurrency=concurrency,
+            force=force_refresh,
+            dry_run=dry_run,
+            ic_trees=ic_trees,
+            base_url=source.base_url,
+            source=source,
+        )
+
+    _run_timed_download(
+        f"revolution {rev}", mirror, concurrency, dry_run, stats_file, interactive, body, confirm
+    )
 
 
 @download_app.command("scw")
@@ -1019,9 +1416,8 @@ def download_scw_cmd(
     force_refresh: bool = typer.Option(False, "--force-refresh", help=_SCOPE_HELP["force_refresh"]),
     mirror: str | None = typer.Option(None, "--mirror", "-m", help=_SCOPE_HELP["mirror"]),
     dry_run: bool = typer.Option(False, "--dry-run", help=_SCOPE_HELP["dry_run"]),
-    yes: bool = typer.Option(
-        False, "--yes", "-y", help="Non-interactive mode: accept all defaults and skip confirmation"
-    ),
+    stats_file: Path | None = typer.Option(None, "--stats-file", help=_SCOPE_HELP["stats_file"]),
+    yes: bool = typer.Option(False, "--yes", "-y", help=_SCOPE_HELP["yes"]),
 ):
     """Download one or more specific Science Windows plus their calibration/support data."""
     _validate_scope_flags(science_only, calib_only)
@@ -1032,48 +1428,55 @@ def download_scw_cmd(
             raise typer.Exit(code=1)
 
     resolved_insts = _resolve_instruments(instruments)
+    interactive = sys.stdin.isatty() and not yes
 
-    async def _main():
-        chosen_mirror_name, base_url = await _check_and_select_mirror(mirror)
-        if sys.stdin.isatty() and not yes and not dry_run:
-            scope_str = (
-                "Science only"
-                if science_only
-                else ("Calibration only" if calib_only else "Science & Calibration")
+    def confirm(source: ArchiveSource) -> None:
+        if not interactive or dry_run:
+            return
+        console.print(
+            Panel(
+                f"[bold green]Download Plan: {len(scw_ids)} Science Window(s)[/bold green]\n\n"
+                f"• Target ScWs:    [cyan]{', '.join(scw_ids[:5])}{'...' if len(scw_ids) > 5 else ''}[/cyan]\n"
+                f"• Target Scope:   [cyan]{_scope_str(science_only, calib_only)}[/cyan]\n"
+                f"{_source_lines(source)}"
+                f"• Instruments:    [cyan]{', '.join(resolved_insts)}[/cyan]\n"
+                f"• Full IC Trees:  [cyan]{'Enabled (multi-GB)' if ic_trees else 'Minimal (indexes, rev context, reference data)'}[/cyan]\n"
+                f"• Destination:    [cyan]{config.rep_base_prod}[/cyan]",
+                title="Download Confirmation",
             )
-            console.print(
-                Panel(
-                    f"[bold green]Download Plan: {len(scw_ids)} Science Window(s)[/bold green]\n\n"
-                    f"• Target ScWs:    [cyan]{', '.join(scw_ids[:5])}{'...' if len(scw_ids) > 5 else ''}[/cyan]\n"
-                    f"• Target Scope:   [cyan]{scope_str}[/cyan]\n"
-                    f"• Mirror:         [cyan]{chosen_mirror_name}[/cyan] ({base_url})\n"
-                    f"• Instruments:    [cyan]{', '.join(resolved_insts)}[/cyan]\n"
-                    f"• Full IC Trees:  [cyan]{'Enabled (multi-GB)' if ic_trees else 'Minimal (indexes, rev context, reference data)'}[/cyan]\n"
-                    f"• Destination:    [cyan]{config.rep_base_prod}[/cyan]",
-                    title="Download Confirmation",
-                )
-            )
-            if not Confirm.ask("Proceed with download?", default=True):
-                console.print("[yellow]Download cancelled by user.[/yellow]")
-                raise typer.Exit(code=0)
+        )
+        if not Confirm.ask("Proceed with download?", default=True):
+            console.print("[yellow]Download cancelled by user.[/yellow]")
+            raise typer.Exit(code=0)
 
-        async with httpx.AsyncClient(http2=True, follow_redirects=True) as client:
-            await _run_data_download(
-                client,
-                config.rep_base_prod,
-                scw_ids,
-                fetch_science=not calib_only,
-                fetch_calib=not science_only,
-                instruments=_resolve_instruments(instruments),
-                cat_version=cat_version,
-                concurrency=concurrency,
-                force=force_refresh,
-                dry_run=dry_run,
-                ic_trees=ic_trees,
-                base_url=base_url,
-            )
+    async def body(client: httpx.AsyncClient, source: ArchiveSource, stats: TransferStats):
+        stats.scw_count, stats.revolutions = len(scw_ids), sorted({s[:4] for s in scw_ids})
+        await _run_data_download(
+            client,
+            config.rep_base_prod,
+            scw_ids,
+            fetch_science=not calib_only,
+            fetch_calib=not science_only,
+            instruments=resolved_insts,
+            cat_version=cat_version,
+            concurrency=concurrency,
+            force=force_refresh,
+            dry_run=dry_run,
+            ic_trees=ic_trees,
+            base_url=source.base_url,
+            source=source,
+        )
 
-    asyncio.run(_main())
+    _run_timed_download(
+        f"scw ({len(scw_ids)})",
+        mirror,
+        concurrency,
+        dry_run,
+        stats_file,
+        interactive,
+        body,
+        confirm,
+    )
 
 
 @download_app.command("file")
@@ -1090,6 +1493,8 @@ def download_file_cmd(
     force_refresh: bool = typer.Option(False, "--force-refresh", help=_SCOPE_HELP["force_refresh"]),
     mirror: str | None = typer.Option(None, "--mirror", "-m", help=_SCOPE_HELP["mirror"]),
     dry_run: bool = typer.Option(False, "--dry-run", help=_SCOPE_HELP["dry_run"]),
+    stats_file: Path | None = typer.Option(None, "--stats-file", help=_SCOPE_HELP["stats_file"]),
+    yes: bool = typer.Option(False, "--yes", "-y", help=_SCOPE_HELP["yes"]),
 ):
     """Download every Science Window listed in a text file, plus their calibration/support data."""
     _validate_scope_flags(science_only, calib_only)
@@ -1106,25 +1511,33 @@ def download_file_cmd(
         console.print(f"[bold red]Error: no ScW IDs found in {path}.[/bold red]")
         raise typer.Exit(code=1)
 
-    async def _main():
-        _chosen_mirror_name, base_url = await _check_and_select_mirror(mirror)
-        async with httpx.AsyncClient(http2=True, follow_redirects=True) as client:
-            await _run_data_download(
-                client,
-                config.rep_base_prod,
-                scw_ids,
-                fetch_science=not calib_only,
-                fetch_calib=not science_only,
-                instruments=_resolve_instruments(instruments),
-                cat_version=cat_version,
-                concurrency=concurrency,
-                force=force_refresh,
-                dry_run=dry_run,
-                ic_trees=ic_trees,
-                base_url=base_url,
-            )
+    async def body(client: httpx.AsyncClient, source: ArchiveSource, stats: TransferStats):
+        stats.scw_count, stats.revolutions = len(scw_ids), sorted({s[:4] for s in scw_ids})
+        await _run_data_download(
+            client,
+            config.rep_base_prod,
+            scw_ids,
+            fetch_science=not calib_only,
+            fetch_calib=not science_only,
+            instruments=_resolve_instruments(instruments),
+            cat_version=cat_version,
+            concurrency=concurrency,
+            force=force_refresh,
+            dry_run=dry_run,
+            ic_trees=ic_trees,
+            base_url=source.base_url,
+            source=source,
+        )
 
-    asyncio.run(_main())
+    _run_timed_download(
+        f"file {path.name} ({len(scw_ids)})",
+        mirror,
+        concurrency,
+        dry_run,
+        stats_file,
+        sys.stdin.isatty() and not yes,
+        body,
+    )
 
 
 @download_app.command("calibration")
@@ -1136,38 +1549,45 @@ def download_calibration_cmd(
     force_refresh: bool = typer.Option(False, "--force-refresh", help=_SCOPE_HELP["force_refresh"]),
     mirror: str | None = typer.Option(None, "--mirror", "-m", help=_SCOPE_HELP["mirror"]),
     dry_run: bool = typer.Option(False, "--dry-run", help=_SCOPE_HELP["dry_run"]),
+    stats_file: Path | None = typer.Option(None, "--stats-file", help=_SCOPE_HELP["stats_file"]),
+    yes: bool = typer.Option(False, "--yes", "-y", help=_SCOPE_HELP["yes"]),
 ):
     """Download catalogs and the IC index without any Science Window data (no revolution context).
 
     Pass --ic-trees to also fetch full per-instrument calibration trees (large)."""
     resolved_instruments = _resolve_instruments(instruments)
 
-    async def _main():
-        chosen_mirror_name, base_url = await _check_and_select_mirror(mirror)
-        async with httpx.AsyncClient(http2=True, follow_redirects=True) as client:
-            if dry_run:
-                ic_desc = (
-                    f"IC trees for {resolved_instruments}"
-                    if ic_trees
-                    else "IC trees (skipped - pass --ic-trees to include)"
-                )
-                console.print(
-                    f"[yellow]Dry run: would ensure catalogs, IC index, and {ic_desc} from {chosen_mirror_name} ({base_url}).[/yellow]"
-                )
-                return
-            semaphore = asyncio.Semaphore(concurrency)
-            await _download_calibration(
-                client,
-                config.rep_base_prod,
-                semaphore,
-                resolved_instruments,
-                cat_version,
-                force_refresh,
-                ic_trees=ic_trees,
-                base_url=base_url,
+    async def body(client: httpx.AsyncClient, source: ArchiveSource, stats: TransferStats):
+        if dry_run:
+            ic_desc = (
+                f"IC trees for {resolved_instruments}"
+                if ic_trees
+                else "IC trees (skipped - pass --ic-trees to include)"
             )
+            console.print(
+                f"[yellow]Dry run: would ensure catalogs, IC index, and {ic_desc} from {source.support_url}.[/yellow]"
+            )
+            return
+        await _download_calibration(
+            client,
+            config.rep_base_prod,
+            asyncio.Semaphore(concurrency),
+            resolved_instruments,
+            cat_version,
+            force_refresh,
+            ic_trees=ic_trees,
+            base_url=source.support_url,
+        )
 
-    asyncio.run(_main())
+    _run_timed_download(
+        "calibration",
+        mirror,
+        concurrency,
+        dry_run,
+        stats_file,
+        sys.stdin.isatty() and not yes,
+        body,
+    )
 
 
 @data_app.command("status")
@@ -1243,7 +1663,7 @@ def archive_status():
 @data_app.command("mirror")
 def mirror_cmd(
     name: str | None = typer.Argument(
-        None, help="Mirror name ('heasarc', 'isdc') or custom URL to set as default"
+        None, help="Mirror name ('heasarc', 's3', 'isla') or custom URL to set as default"
     ),
     test: bool = typer.Option(
         False, "--test", "-t", help="Test latency and availability of all known mirrors"
@@ -1253,6 +1673,7 @@ def mirror_cmd(
     if test or not name:
         table = Table(title="INTEGRAL Archive Mirrors")
         table.add_column("Mirror Name", style="cyan")
+        table.add_column("Serves", style="white")
         table.add_column("Base URL", style="blue")
         table.add_column("Active", style="yellow")
         table.add_column("Status / Latency", style="green")
@@ -1271,13 +1692,24 @@ def mirror_cmd(
                         status_str = f"[bold red]Offline ({err})[/bold red]"
                 else:
                     status_str = "[dim]Not tested (run with --test)[/dim]"
-                table.add_row(m_name, url, is_active, status_str)
+                table.add_row(
+                    m_name, MIRROR_DESCRIPTIONS.get(m_name, ""), url, is_active, status_str
+                )
 
         asyncio.run(_test_all())
         console.print(table)
+        if current in RETIRED_MIRRORS:
+            console.print(
+                f"[bold yellow]Your configured default '{current}' is retired: "
+                f"{RETIRED_MIRRORS[current]}[/bold yellow]"
+            )
 
     if name:
-        resolved_name, base_url = resolve_mirror_base(name)
+        try:
+            resolved_name, base_url = resolve_mirror_base(name)
+        except RetiredMirrorError as e:
+            console.print(f"[bold red]Error: {e}[/bold red]")
+            raise typer.Exit(code=1) from None
         config.archive_mirror = resolved_name if resolved_name in KNOWN_MIRRORS else base_url
         config.save()
         console.print(

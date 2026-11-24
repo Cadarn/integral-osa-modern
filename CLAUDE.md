@@ -64,9 +64,14 @@ The codebase follows the modern Python `src-layout` centered in `src/integral/` 
   primitive: mounts local data (`scw/`, `aux/`, `ic/`, `idx/`, `cat/` as read-only
   volumes keyed off `config.rep_base_prod`/`config.current_ic`), resolves host symlinks,
   matches host UID:GID, and executes within the container environment.
-- `data.py` — async httpx/HTTP2 downloader for HEASARC and ISDC archives; handles local archive layout
+- `data.py` — async httpx/HTTP2 downloader. Sources: HEASARC HTTPS directory tree, NASA's public
+  S3 bucket (`s3.py` renders ListObjectsV2 results as HTML listings so the same parsers work), or
+  ESA ISLA for ScW data (`isla.py`, HEASARC for support data); the old ISDC mirror is retired.
+  `data download revolution` takes ranges/lists (`0060-0065,0071`). Handles local archive layout
   (`scw/<rev>/`, `idx/ic/`, `aux/adp/<rev>.001/`), atomic `.tmp`-then-rename downloads, mirror health
-  probing (`integral data mirror --test`), and local data import.
+  probing (`integral data mirror --test`), and local data import. Per-phase timing/throughput is
+  collected via `transfer_stats.py` (contextvar-based, so helpers just call `record_file()`);
+  retries live in `http.py`.
 - `calibration.py` — declarative calibration profiles (`CalibrationProfile`, `CalibrationRule`)
   and index filtering engine for historical re-play and modern baselines.
 - `scw.py` — `filter_pointing_scws()`, the pointing-ScW-selection convention (IDs ending `0010`,

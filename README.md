@@ -59,7 +59,7 @@ uv run integral status
 # Initialise local archive (default: ~/science/integral_data_archive)
 uv run integral data init
 
-# Inspect and test archive mirrors (heasarc, isdc, or custom endpoints)
+# Inspect and test archive sources (heasarc, s3, isla, or custom endpoints)
 uv run integral data mirror --test
 
 # Switch default archive mirror
@@ -73,8 +73,14 @@ uv run integral data import-local /path/to/0060 --link
 # already present)
 uv run integral data download revolution 0060 --count 5
 
-# Download with an explicit mirror override
-uv run integral data download revolution 0060 --count 5 --mirror heasarc
+# Whole revolutions, ranges or lists: 0102, 0060-0065, 0060,0071
+uv run integral data download revolution 0060-0062 --count 5
+
+# Download with an explicit source: 's3' reads NASA's public AWS bucket (s3://nasa-heasarc,
+# no credentials needed); 'isla' fetches ScW data from ESA's INTEGRAL Science Legacy Archive
+# (catalogs/IC/aux still come from HEASARC). --stats-file appends a JSON timing record per
+# run; every download also prints a per-phase timing/throughput table.
+uv run integral data download revolution 0060 --count 5 --mirror isla --stats-file timings.jsonl
 
 # Or fetch specific ScWs, or a whole file of ScW IDs
 uv run integral data download scw 006000010010,006000020010
@@ -85,8 +91,11 @@ uv run integral data download calibration --ic-trees --instruments ibis,jmx1,jmx
 ```
 > [!NOTE]
 > A reduction needs the full IC calibration tree (`--ic-trees`) for its instrument, not just
-> the default catalogs/IC-index/aux fetch above. The CLI features automated mirror health checks
-> with fallback and seamless switching between HEASARC and European archive mirrors.
+> the default catalogs/IC-index/aux fetch above. The CLI checks the mirror before downloading. In
+> interactive sessions it offers a fallback (HEASARC HTTPS ↔ S3, ISLA → HEASARC) if one is down;
+> `-y` runs never switch. The former ISDC (Geneva) HTTP mirror is offline and has been retired.
+> See [docs/tutorial_ibis_multi_revolution.md](docs/tutorial_ibis_multi_revolution.md) for a
+> multi-revolution IBIS walkthrough and a HEASARC-vs-ISLA timing recipe.
 
 ### 5. Run Scientific Reduction Pipelines via CLI
 ```bash
